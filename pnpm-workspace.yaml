@@ -5,8 +5,9 @@ allowBuilds:
   '@biomejs/biome': true
   esbuild: true
   keytar: true
-  sharp: set this to true or false
+  sharp: true
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - esbuild
   - keytar
+  - sharp
