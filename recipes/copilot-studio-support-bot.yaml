@@ -1,0 +1,7 @@
+id: copilot-studio-support-bot
+title: Copilot Studio — Support Bot
+target: copilot-studio
+description: Dataverse-backed support agent with KB, REST tools, Teams channel publish.
+defaults:
+  channels: [teams]
+  environment: new

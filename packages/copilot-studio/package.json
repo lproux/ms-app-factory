@@ -1,0 +1,21 @@
+{
+  "name": "@app-factory/copilot-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@app-factory/shared": "workspace:*",
+    "@app-factory/orchestrator": "workspace:*",
+    "@app-factory/auth-broker": "workspace:*",
+    "@app-factory/secret-store": "workspace:*",
+    "execa": "^9.5.2"
+  }
+}

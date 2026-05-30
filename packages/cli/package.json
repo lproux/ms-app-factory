@@ -1,0 +1,24 @@
+{
+  "name": "@app-factory/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "app-factory": "./dist/cli.js" },
+  "scripts": {
+    "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean --target node22 --no-splitting",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/cli.js",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@app-factory/copilot-studio": "workspace:*",
+    "@app-factory/elicitation": "workspace:*",
+    "@app-factory/shared": "workspace:*",
+    "@app-factory/teams-app": "workspace:*",
+    "commander": "^12.1.0",
+    "nanoid": "^5.0.9",
+    "yaml": "^2.7.0"
+  }
+}

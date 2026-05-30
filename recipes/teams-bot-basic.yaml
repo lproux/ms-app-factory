@@ -1,0 +1,8 @@
+id: teams-bot-basic
+title: Teams — Basic Bot
+target: teams
+description: Teams bot app via atk, with Entra + bot registration + Azure resources.
+defaults:
+  capabilities: [bot]
+  region: eastus
+  resourceGroup: rg-app-factory

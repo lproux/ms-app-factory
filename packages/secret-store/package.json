@@ -1,0 +1,20 @@
+{
+  "name": "@app-factory/secret-store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@app-factory/shared": "workspace:*",
+    "@azure/keyvault-secrets": "^4.9.0",
+    "@azure/identity": "^4.5.0",
+    "keytar": "^7.9.0"
+  }
+}

@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "packages/skill-adapters/*"
+allowBuilds:
+  '@biomejs/biome': true
+  esbuild: true
+  keytar: true
+onlyBuiltDependencies:
+  - "@biomejs/biome"
+  - esbuild
+  - keytar

@@ -1,0 +1,17 @@
+{
+  "name": "@app-factory/skill-claude",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "app-factory-install-claude-skill": "./dist/install.js" },
+  "scripts": {
+    "build": "tsup src/index.ts src/install.ts --format esm --dts --clean --target node22 --no-splitting",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@app-factory/shared": "workspace:*"
+  }
+}
