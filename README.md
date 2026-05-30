@@ -4,7 +4,12 @@ A unified factory for provisioning **Copilot Studio agents** and **Microsoft Tea
 
 ## Status
 
-Phase 1 — foundations. See [plan](/home/lproux/.claude/plans/i-want-to-delightful-orbit.md).
+Phase 2 shipped. Plan: `~/.claude/plans/i-want-to-delightful-orbit.md`.
+
+Repo location: `OneDrive - Microsoft/bkp/Desktop/App Factory/` (Windows-synced).
+Recommended: exclude `node_modules/` from OneDrive sync — right-click the folder
+in Explorer → "Always keep on this device" off, or add to OneDrive's excluded
+folders in Settings → Sync and backup → Manage backup.
 
 ## Layout
 

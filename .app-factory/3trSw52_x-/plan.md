@@ -4,7 +4,7 @@ A Dataverse-backed support agent with knowledge base, REST tools, and Teams chan
 
 ## Inputs
 
-- **Agent display name** — `AcmeSupport`
+- **Agent display name** — `Acme`
 - **One-line purpose** — `Triage`
 - **Primary audience** — `Internal`
 - **Power Platform environment (id or "new")** — `new`
