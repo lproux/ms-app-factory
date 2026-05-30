@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
@@ -16,6 +17,20 @@
     "@app-factory/orchestrator": "workspace:*",
     "@app-factory/auth-broker": "workspace:*",
     "@app-factory/secret-store": "workspace:*",
-    "execa": "^9.5.2"
+    "@app-factory/logo-pipeline": "workspace:*",
+    "@app-factory/judge-panel": "workspace:*",
+    "@azure/identity": "^4.5.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "isomorphic-fetch": "^3.0.0",
+    "execa": "^9.5.2",
+    "adm-zip": "^0.5.16",
+    "simple-git": "^3.27.0",
+    "mammoth": "^1.9.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/isomorphic-fetch": "^0.0.39",
+    "vitest": "^2.1.8"
   }
 }

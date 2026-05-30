@@ -85,15 +85,4 @@ export function azureKeyVaultAdapter(client: KvClient): KeyVaultAdapter {
   };
 }
 
-export function buildPasteBundle(items: { scope: string; name: string; value: string; description?: string }[]): string {
-  const lines = ['# App Factory — secrets bundle', '', '> Paste into Claude Code or `gh copilot` to wire these into a downstream config.', ''];
-  for (const it of items) {
-    lines.push(`## ${it.scope} / ${it.name}`);
-    if (it.description) lines.push(it.description);
-    lines.push('```');
-    lines.push(it.value);
-    lines.push('```');
-    lines.push('');
-  }
-  return lines.join('\n');
-}
+export { buildPasteBundle, type PasteItem, type PasteBundleOptions, type CostSuggestion } from './paste.js';

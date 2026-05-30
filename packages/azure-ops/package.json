@@ -1,0 +1,32 @@
+{
+  "name": "@app-factory/azure-ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@app-factory/shared": "workspace:*",
+    "@app-factory/orchestrator": "workspace:*",
+    "@app-factory/auth-broker": "workspace:*",
+    "@azure/arm-resources": "^6.0.0",
+    "@azure/arm-authorization": "^9.0.0",
+    "@azure/arm-subscriptions": "^5.1.0",
+    "@azure/identity": "^4.5.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "isomorphic-fetch": "^3.0.0",
+    "execa": "^9.5.2",
+    "nanoid": "^5.0.9"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8",
+    "@types/isomorphic-fetch": "^0.0.39"
+  }
+}

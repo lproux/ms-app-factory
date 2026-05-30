@@ -49,12 +49,42 @@ export async function run(args: RunArgs): Promise<RunResult> {
     const planPath = path.join(workdir, 'plan.md');
     await fs.writeFile(planPath, planMd, 'utf8');
     log.info({ planPath }, 'plan written');
+
+    const fctxPlan = FactoryContext.parse({
+      runId,
+      recipe: recipe.id,
+      planOnly: true,
+      workdir,
+      brand: { name: String(answers['name'] ?? recipe.title), logoPath: stringOrUndef(answers['logoPath']) },
+      kbSources: parseKbSources(answers['kbSources']),
+      tenant: {
+        subscriptionId: stringOrUndef(answers['subscription']),
+        resourceGroup: stringOrUndef(answers['resourceGroup']),
+        region: stringOrUndef(answers['region']),
+        powerPlatformEnvironment: stringOrUndef(answers['environment']),
+      },
+    });
+    let stepList = '';
+    try {
+      if (recipe.target === 'copilot-studio') {
+        const { copilotStudioSteps } = await import('@app-factory/copilot-studio');
+        stepList = renderStepList('Copilot Studio (WBS A)', copilotStudioSteps);
+      } else if (recipe.target === 'teams') {
+        const { teamsAppSteps } = await import('@app-factory/teams-app');
+        stepList = renderStepList('Teams App (WBS B)', teamsAppSteps);
+      }
+    } catch (err) {
+      log.warn({ err: (err as Error).message }, 'unable to enumerate WBS steps in plan mode');
+    }
+    const finalPlan = `${planMd}\n\n${stepList}`.trimEnd();
+    await fs.writeFile(planPath, finalPlan, 'utf8');
+    void fctxPlan;
     return {
       ok: true,
       runId,
       artifacts: [],
       secrets: [],
-      pasteBundle: planMd,
+      pasteBundle: finalPlan,
       log: planPath,
       warnings: [],
       errors: [],
@@ -94,6 +124,23 @@ async function loadRecipe(args: RunArgs): Promise<Recipe> {
 
 function stringOrUndef(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+interface RenderableStep {
+  id: string;
+  description: string;
+  dependsOn?: string[];
+  parallelGroup?: string;
+}
+
+function renderStepList(title: string, steps: readonly RenderableStep[]): string {
+  const lines = [`## WBS — ${title}`, ''];
+  for (const s of steps) {
+    const dep = s.dependsOn?.length ? ` _(after: ${s.dependsOn.join(', ')})_` : '';
+    const grp = s.parallelGroup ? ` _(group: ${s.parallelGroup})_` : '';
+    lines.push(`- \`${s.id}\` — ${s.description}${dep}${grp}`);
+  }
+  return lines.join('\n');
 }
 
 function parseKbSources(v: unknown): { kind: 'local' | 'sharepoint' | 'url' | 'github' | 'aws-s3' | 'gcp-gcs' | 'foundry' | 'm365-admin'; uri: string }[] {
