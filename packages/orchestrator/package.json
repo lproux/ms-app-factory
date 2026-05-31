@@ -9,11 +9,17 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "demo:multi-terminal": "node --experimental-strip-types --experimental-transform-types --no-warnings ../../tools/multi-terminal-demo.ts",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
     "@app-factory/shared": "workspace:*",
     "execa": "^9.5.2",
     "nanoid": "^5.0.9"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
   }
 }
