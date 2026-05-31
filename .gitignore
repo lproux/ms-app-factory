@@ -10,3 +10,5 @@ coverage/
 *.tsbuildinfo
 plans/runs/
 .tmp/
+.app-factory/
+/plan.md
