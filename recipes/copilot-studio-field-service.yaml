@@ -1,0 +1,7 @@
+id: copilot-studio-field-service
+title: Copilot Studio — Field Service Agent
+target: copilot-studio
+description: Dataverse + Dynamics 365 Field Service agent (work orders, scheduling, technician dispatch) published to Teams + web.
+defaults:
+  channels: [teams, web]
+  environment: new

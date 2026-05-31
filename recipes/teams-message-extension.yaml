@@ -1,0 +1,8 @@
+id: teams-message-extension
+title: Teams — Message Extension
+target: teams
+description: Teams message-extension app via atk (template=messageExtension), Entra app reg, configurable command id.
+defaults:
+  region: eastus
+  resourceGroup: rg-app-factory
+  meCommandId: searchCmd

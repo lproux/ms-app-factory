@@ -1,0 +1,8 @@
+id: teams-tab-basic
+title: Teams — Personal Tab
+target: teams
+description: Teams personal tab app via atk (template=tab), Entra app reg, configurable landing route.
+defaults:
+  region: eastus
+  resourceGroup: rg-app-factory
+  tabRoute: "/"

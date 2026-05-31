@@ -1,0 +1,9 @@
+id: teams-agent-365
+title: Teams — Agent 365
+target: teams
+description: Microsoft 365 Copilot agent (Agent 365) scaffolded via the Agent 365 CLI path (stub — full wiring lands in a future bucket).
+defaults:
+  region: eastus
+  resourceGroup: rg-app-factory
+  m365CopilotEnabled: true
+  kbSourcesAgent365: true

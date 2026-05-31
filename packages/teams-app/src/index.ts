@@ -13,7 +13,7 @@ import {
   type SecretRef,
 } from '@app-factory/shared';
 import { execute, type Step } from '@app-factory/orchestrator';
-import { buildPasteBundle, SecretStore, type CostSuggestion } from '@app-factory/secret-store';
+import { buildPasteBundle, buildSecretStore, type CostSuggestion } from '@app-factory/secret-store';
 import { getCredential } from '@app-factory/auth-broker';
 import {
   assignAppAdminRole,
@@ -27,6 +27,7 @@ import {
   stampEnvFile,
 } from '@app-factory/azure-ops';
 import {
+  autoImprove,
   JudgePanel,
   makeClaudeJudge,
   makeCopilotStudioJudge,
@@ -88,6 +89,35 @@ const DEFAULT_REGION = 'eastus';
 const DEFAULT_RG = 'rg-app-factory';
 const BOT_REDIRECT_URI = 'https://token.botframework.com/.auth/web/redirect';
 
+/**
+ * Map a recipe id (any string from `FactoryContext.recipe`) onto the atk
+ * template + capability flags that `atk new` expects for the B2 scaffold step.
+ * Unknown ids fall back to the legacy `bot` template so existing
+ * `teams-bot-basic` flows are unaffected.
+ *
+ * Note: `teams-agent-365` is included for completeness but the B2 step
+ * short-circuits before reaching `atk new` for that recipe — the Agent 365
+ * CLI path is a future bucket.
+ */
+export interface AtkTemplateChoice {
+  template: string;
+  capability: string;
+}
+
+export function selectAtkTemplate(recipe: string): AtkTemplateChoice {
+  switch (recipe) {
+    case 'teams-tab-basic':
+      return { template: 'tab', capability: 'tab' };
+    case 'teams-message-extension':
+      return { template: 'messageExtension', capability: 'me' };
+    case 'teams-agent-365':
+      return { template: 'agent-365', capability: 'agent-365' };
+    case 'teams-bot-basic':
+    default:
+      return { template: 'bot', capability: 'bot' };
+  }
+}
+
 function requireProject(ctx: TACtx): ProjectInfo {
   if (!ctx.project) {
     throw new AppFactoryError('TEAMS_STATE', 'project info missing — B2-scaffold must run first');
@@ -126,8 +156,40 @@ const steps: Step<TACtx>[] = [
         const folder = ctx.fctx.workdir;
         await mkdir(folder, { recursive: true });
         const projectPath = join(folder, appName);
+        const tmpl = selectAtkTemplate(ctx.fctx.recipe);
+
+        // Agent 365 does not use the atk CLI — it has its own m365agents CLI
+        // pipeline that is owned by a future bucket. For now we record the
+        // intent + emit a recoverable ProvisioningError so the orchestrator
+        // can surface a clear "not yet wired" message.
+        if (ctx.fctx.recipe === 'teams-agent-365') {
+          log.info(
+            { recipe: ctx.fctx.recipe, projectPath, appName },
+            'Agent 365 CLI path not yet wired',
+          );
+          ctx.project = { projectPath, appName };
+          ctx.artifacts.push({
+            kind: 'teams-app',
+            id: projectPath,
+            displayName: appName,
+            metadata: { scaffold: 'agent-365-stub' },
+          });
+          throw new ProvisioningError(
+            'Agent 365 CLI path not yet wired — scaffolding via the Agent 365 toolchain is a future bucket.',
+            {
+              recoverable: true,
+              details: { recipe: ctx.fctx.recipe, projectPath, appName },
+            },
+          );
+        }
+
         try {
-          await atk.atkNew({ template: 'bot', name: appName, folder, capability: 'bot' });
+          await atk.atkNew({
+            template: tmpl.template,
+            name: appName,
+            folder,
+            capability: tmpl.capability,
+          });
         } catch (err) {
           if (err instanceof PortalRequiredError) {
             ctx.warnings.push(`atk CLI unavailable; portal fallback required: ${err.message}`);
@@ -140,9 +202,9 @@ const steps: Step<TACtx>[] = [
           kind: 'teams-app',
           id: projectPath,
           displayName: appName,
-          metadata: { scaffold: 'atk-bot' },
+          metadata: { scaffold: `atk-${tmpl.template}` },
         });
-        log.info({ projectPath, appName }, 'B2 scaffold complete');
+        log.info({ projectPath, appName, template: tmpl.template }, 'B2 scaffold complete');
       }),
   },
   {
@@ -417,7 +479,7 @@ const steps: Step<TACtx>[] = [
           makeCopilotStudioJudge({ persona }),
         ]);
         const panel = new JudgePanel({ judges, policy: { vetoOn: ['security'] } });
-        const artifact: JudgeArtifact = {
+        const buildArtifact = (extraNotes: string[]): JudgeArtifact => ({
           kind: 'teams-app',
           id: ctx.bot?.botId ?? ctx.entra?.appId ?? ctx.fctx.runId,
           displayName: ctx.fctx.brand?.name ?? 'teams-bot',
@@ -430,17 +492,30 @@ const steps: Step<TACtx>[] = [
             `BotId: ${ctx.bot?.botId ?? '<unset>'}`,
             `Artifacts: ${ctx.artifacts.length}`,
             `Warnings so far: ${ctx.warnings.length}`,
+            ...(extraNotes.length > 0 ? [`RepairNotes: ${extraNotes.join(' | ')}`] : []),
           ].join('\n'),
           payload: {
             artifacts: ctx.artifacts,
             warnings: ctx.warnings,
+            repairNotes: extraNotes,
           },
-        };
+        });
         try {
-          ctx.panel = await panel.review(artifact);
+          const converged = await autoImprove({
+            panel,
+            initial: { input: ctx, artifact: buildArtifact([]) },
+            maxRounds: 3,
+            regenerate: async (input, repairNotes) => {
+              input.warnings.push(`B13 auto-improve repair notes: ${repairNotes.join(' | ')}`);
+              return { input, artifact: buildArtifact(repairNotes) };
+            },
+          });
+          // autoImprove returns once the panel passes — re-run to capture the passing PanelResult.
+          ctx.panel = await panel.review(converged.artifact);
+          log.info({ rounds: converged.rounds }, 'B13 auto-improve converged');
         } catch (err) {
           if (err instanceof JudgeVetoError) {
-            ctx.warnings.push(`B13 judge veto: ${err.message}`);
+            ctx.warnings.push(`B13 judge veto after auto-improve: ${err.message}`);
             ctx.panel = {
               vetoed: true,
               approvals: 0,
@@ -465,7 +540,13 @@ const steps: Step<TACtx>[] = [
     dependsOn: ['B13-judge-panel'],
     run: async (ctx) =>
       span('B14', async () => {
-        const store = new SecretStore();
+        const vaultCred = ctx.fctx.emit.keyVault
+          ? getCredential({ mode: ctx.fctx.auth.mode, tenantId: ctx.fctx.tenant?.tenantId })
+          : undefined;
+        const store = await buildSecretStore({
+          keyVaultUrl: ctx.fctx.emit.keyVault,
+          credential: vaultCred,
+        });
         for (const s of ctx.secrets) {
           await store.set(s.ref.scope, s.ref.name, s.value);
         }
