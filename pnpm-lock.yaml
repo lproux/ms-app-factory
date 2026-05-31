@@ -357,6 +357,9 @@ importers:
 
   packages/secret-store:
     dependencies:
+      '@app-factory/auth-broker':
+        specifier: workspace:*
+        version: link:../auth-broker
       '@app-factory/shared':
         specifier: workspace:*
         version: link:../shared
@@ -369,6 +372,10 @@ importers:
       keytar:
         specifier: ^7.9.0
         version: 7.9.0
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
 
   packages/shared:
     dependencies:

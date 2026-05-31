@@ -2,7 +2,6 @@ import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import {
   AppFactoryError,
-  JudgeVetoError,
   PortalRequiredError,
   ProvisioningError,
   createLogger,
@@ -13,7 +12,7 @@ import {
   type SecretRef,
 } from '@app-factory/shared';
 import { execute, type Step } from '@app-factory/orchestrator';
-import { buildPasteBundle, buildSecretStore, type CostSuggestion } from '@app-factory/secret-store';
+import { finalizeRun, type CostSuggestion } from '@app-factory/secret-store';
 import { getCredential } from '@app-factory/auth-broker';
 import {
   assignAppAdminRole,
@@ -27,11 +26,9 @@ import {
   stampEnvFile,
 } from '@app-factory/azure-ops';
 import {
-  autoImprove,
-  buildJudgePanel,
+  runJudgePanelStep,
   type JudgeArtifact,
   type PanelResult,
-  type Persona,
 } from '@app-factory/judge-panel';
 import * as atk from './atk.js';
 import {
@@ -94,6 +91,7 @@ interface TACtx {
   bot?: BotInfo;
   panel?: PanelResult;
   costSuggestions?: CostSuggestion[];
+  pasteBundle?: string;
 }
 
 const DEFAULT_ENV = 'dev';
@@ -526,12 +524,6 @@ const steps: Step<TACtx>[] = [
     dependsOn: ['B12-smoke-test'],
     run: async (ctx) =>
       span('B13', async () => {
-        const personas: Persona[] = ['architect', 'security', 'cost', 'ux'];
-        const panel = buildJudgePanel({
-          shape: ctx.fctx.judge.shape,
-          personas,
-          policy: { vetoOn: ['security'] },
-        });
         const buildArtifact = (extraNotes: string[]): JudgeArtifact => ({
           kind: 'teams-app',
           id: ctx.bot?.botId ?? ctx.entra?.appId ?? ctx.fctx.runId,
@@ -553,38 +545,12 @@ const steps: Step<TACtx>[] = [
             repairNotes: extraNotes,
           },
         });
-        try {
-          const converged = await autoImprove({
-            panel,
-            initial: { input: ctx, artifact: buildArtifact([]) },
-            maxRounds: ctx.fctx.judge.maxRounds,
-            regenerate: async (input, repairNotes) => {
-              input.warnings.push(`B13 auto-improve repair notes: ${repairNotes.join(' | ')}`);
-              return { input, artifact: buildArtifact(repairNotes) };
-            },
-          });
-          // autoImprove returns once the panel passes — re-run to capture the passing PanelResult.
-          ctx.panel = await panel.review(converged.artifact);
-          log.info({ rounds: converged.rounds }, 'B13 auto-improve converged');
-        } catch (err) {
-          if (err instanceof JudgeVetoError) {
-            ctx.warnings.push(`B13 judge veto after auto-improve: ${err.message}`);
-            ctx.panel = {
-              vetoed: true,
-              approvals: 0,
-              rejections: err.votes.length,
-              verdicts: err.votes.map((v) => ({
-                judge: v.judge,
-                persona: 'architect',
-                approved: false,
-                reason: v.reason,
-              })),
-              repairNotes: err.votes.map((v) => v.reason),
-            };
-            return;
-          }
-          ctx.warnings.push(`B13 judge panel error: ${(err as Error).message}`);
-        }
+        const { panel } = await runJudgePanelStep<TACtx>({
+          ctx,
+          kind: 'B13',
+          buildArtifact,
+        });
+        ctx.panel = panel;
       }),
   },
   {
@@ -593,17 +559,8 @@ const steps: Step<TACtx>[] = [
     dependsOn: ['B13-judge-panel'],
     run: async (ctx) =>
       span('B14', async () => {
-        const vaultCred = ctx.fctx.emit.keyVault
-          ? getCredential({ mode: ctx.fctx.auth.mode, tenantId: ctx.fctx.tenant?.tenantId })
-          : undefined;
-        const store = await buildSecretStore({
-          keyVaultUrl: ctx.fctx.emit.keyVault,
-          credential: vaultCred,
-        });
-        for (const s of ctx.secrets) {
-          await store.set(s.ref.scope, s.ref.name, s.value);
-        }
-
+        // 1) Cost optimizer runs BEFORE finalizeRun so its suggestions
+        // can be threaded into the paste bundle.
         if (ctx.azure) {
           try {
             const cred = getCredential({
@@ -628,6 +585,7 @@ const steps: Step<TACtx>[] = [
           }
         }
 
+        // 2) Build the `identifiers` summary block (public IDs only, no secrets).
         const summaryLines: string[] = [];
         if (ctx.entra) {
           summaryLines.push(`AAD_APP_CLIENT_ID=${ctx.entra.appId}`);
@@ -652,6 +610,17 @@ const steps: Step<TACtx>[] = [
             value: summaryLines.join('\n'),
           });
         }
+
+        // 3) Persist secrets to keyring/Key Vault + render the paste bundle.
+        const { pasteBundle } = await finalizeRun({
+          fctx: ctx.fctx,
+          ctx,
+          kind: 'teams-app',
+          title: '# App Factory — Teams app run report',
+          ...(ctx.costSuggestions ? { costSuggestions: ctx.costSuggestions } : {}),
+        });
+        ctx.pasteBundle = pasteBundle;
+
         log.info({ secretCount: ctx.secrets.length }, 'B14 emit complete');
       }),
   },
@@ -667,23 +636,10 @@ export async function runTeamsApp(fctx: FactoryContext): Promise<RunResult> {
     onStep: (id, phase, err) => log_.info({ id, phase, err: err?.message }, `step:${id}:${phase}`),
   });
 
-  const pasteBundle = buildPasteBundle(
-    ctx.secrets.map((s) => ({
-      scope: s.ref.scope,
-      name: s.ref.name,
-      value: s.value,
-      description: s.ref.description,
-    })),
-    {
-      title: '# App Factory — Teams app run report',
-      artifacts: ctx.artifacts,
-      warnings: ctx.warnings,
-      revealSecrets: ctx.fctx.emit.revealSecrets === true,
-      ...(ctx.costSuggestions && ctx.costSuggestions.length > 0
-        ? { costSuggestions: ctx.costSuggestions }
-        : {}),
-    },
-  );
+  // B14 owns SecretStore.set + paste-bundle synthesis. If the WBS halted
+  // before B14 ran, fall back to an empty marker so the RunResult
+  // contract still holds.
+  const pasteBundle = ctx.pasteBundle ?? '';
 
   return {
     ok: true,

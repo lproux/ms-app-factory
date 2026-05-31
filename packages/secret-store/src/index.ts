@@ -107,3 +107,9 @@ export function azureKeyVaultAdapter(client: KvClient): KeyVaultAdapter {
 }
 
 export { buildPasteBundle, type PasteItem, type PasteBundleOptions, type CostSuggestion } from './paste.js';
+export {
+  finalizeRun,
+  type FinalizeRunArgs,
+  type FinalizeRunResult,
+  type RunAccumulator,
+} from './finalize-run.js';

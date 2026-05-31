@@ -3,6 +3,7 @@ export * from './voting.js';
 export * from './panel.js';
 export * from './auto-improve.js';
 export * from './build-panel.js';
+export * from './judge-step.js';
 export {
   buildPrompt,
   parseVerdict,

@@ -2,7 +2,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   AppFactoryError,
-  JudgeVetoError,
   createLogger,
   PortalRequiredError,
   span,
@@ -12,15 +11,13 @@ import {
   type SecretRef,
 } from '@app-factory/shared';
 import { execute, type Step } from '@app-factory/orchestrator';
-import { buildPasteBundle, buildSecretStore } from '@app-factory/secret-store';
+import { finalizeRun } from '@app-factory/secret-store';
 import { buildLogoSet } from '@app-factory/logo-pipeline';
 import { getCredential } from '@app-factory/auth-broker';
 import {
-  autoImprove,
-  buildJudgePanel,
+  runJudgePanelStep,
   type JudgeArtifact,
   type PanelResult,
-  type Persona,
 } from '@app-factory/judge-panel';
 import {
   envCreate,
@@ -56,6 +53,7 @@ interface CSCtx {
   agentRecordId?: string;
   invokeUrl?: string;
   panel?: PanelResult;
+  pasteBundle?: string;
 }
 
 const steps: Step<CSCtx>[] = [
@@ -354,12 +352,6 @@ const steps: Step<CSCtx>[] = [
     dependsOn: ['A10-smoke-test'],
     run: async (ctx) =>
       span('A11', async () => {
-        const personas: Persona[] = ['architect', 'security', 'cost', 'ux'];
-        const panel = buildJudgePanel({
-          shape: ctx.fctx.judge.shape,
-          personas,
-          policy: { vetoOn: ['security'] },
-        });
         const buildArtifact = (extraNotes: string[]): JudgeArtifact => ({
           kind: 'cs-agent',
           id: ctx.agentRecordId ?? ctx.agentDef?.uniqueName ?? ctx.fctx.runId,
@@ -381,37 +373,12 @@ const steps: Step<CSCtx>[] = [
             repairNotes: extraNotes,
           },
         });
-        try {
-          const converged = await autoImprove({
-            panel,
-            initial: { input: ctx, artifact: buildArtifact([]) },
-            maxRounds: ctx.fctx.judge.maxRounds,
-            regenerate: async (input, repairNotes) => {
-              input.warnings.push(`A11 auto-improve repair notes: ${repairNotes.join(' | ')}`);
-              return { input, artifact: buildArtifact(repairNotes) };
-            },
-          });
-          ctx.panel = await panel.review(converged.artifact);
-          log.info({ rounds: converged.rounds }, 'A11 auto-improve converged');
-        } catch (err) {
-          if (err instanceof JudgeVetoError) {
-            ctx.warnings.push(`A11 judge veto after auto-improve: ${err.message}`);
-            ctx.panel = {
-              vetoed: true,
-              approvals: 0,
-              rejections: err.votes.length,
-              verdicts: err.votes.map((v) => ({
-                judge: v.judge,
-                persona: 'architect',
-                approved: false,
-                reason: v.reason,
-              })),
-              repairNotes: err.votes.map((v) => v.reason),
-            };
-            return;
-          }
-          ctx.warnings.push(`A11 judge panel error: ${(err as Error).message}`);
-        }
+        const { panel } = await runJudgePanelStep<CSCtx>({
+          ctx,
+          kind: 'A11',
+          buildArtifact,
+        });
+        ctx.panel = panel;
       }),
   },
   {
@@ -451,6 +418,18 @@ const steps: Step<CSCtx>[] = [
             value: ctx.invokeUrl,
           });
         }
+        // Persist secrets to keyring/Key Vault and render the paste bundle.
+        // Lifecycle parity with B14: emit now lives inside the step that
+        // owns it, so `runCopilotStudio` is a thin wrapper that just
+        // returns the already-built bundle. Track A has no cost optimizer
+        // yet, so no `costSuggestions` are passed.
+        const { pasteBundle } = await finalizeRun({
+          fctx: ctx.fctx,
+          ctx,
+          kind: 'cs-agent',
+          title: '# App Factory — Copilot Studio run report',
+        });
+        ctx.pasteBundle = pasteBundle;
       }),
   },
 ];
@@ -471,30 +450,11 @@ export async function runCopilotStudio(fctx: FactoryContext): Promise<RunResult>
     log_.error({ err }, 'WBS execution halted');
   }
 
-  const vaultCred = fctx.emit.keyVault
-    ? getCredential({ mode: fctx.auth.mode, tenantId: fctx.tenant?.tenantId })
-    : undefined;
-  const store = await buildSecretStore({
-    keyVaultUrl: fctx.emit.keyVault,
-    credential: vaultCred,
-  });
-  for (const s of ctx.secrets) {
-    await store.set(s.ref.scope, s.ref.name, s.value);
-  }
-  const pasteBundle = buildPasteBundle(
-    ctx.secrets.map((s) => ({
-      scope: s.ref.scope,
-      name: s.ref.name,
-      value: s.value,
-      description: s.ref.description,
-    })),
-    {
-      title: '# App Factory — Copilot Studio run report',
-      artifacts: ctx.artifacts,
-      warnings: ctx.warnings,
-      revealSecrets: fctx.emit.revealSecrets === true,
-    },
-  );
+  // A12 owns SecretStore.set + paste-bundle synthesis (parity with B14).
+  // If the WBS halted before A12 ran (e.g. PortalRequiredError mid-flight)
+  // `ctx.pasteBundle` will be undefined — emit an empty marker so the
+  // RunResult contract still holds.
+  const pasteBundle = ctx.pasteBundle ?? '';
 
   return {
     ok: errors.length === 0,
