@@ -1,0 +1,30 @@
+{
+  "name": "@app-factory/integration-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf .turbo"
+  },
+  "dependencies": {
+    "@app-factory/shared": "workspace:*",
+    "@app-factory/orchestrator": "workspace:*",
+    "@app-factory/secret-store": "workspace:*",
+    "@app-factory/judge-panel": "workspace:*",
+    "@app-factory/auth-broker": "workspace:*",
+    "@app-factory/azure-ops": "workspace:*",
+    "@app-factory/copilot-studio": "workspace:*",
+    "@app-factory/teams-app": "workspace:*",
+    "@app-factory/elicitation": "workspace:*",
+    "@app-factory/cli": "workspace:*",
+    "@app-factory/skill-claude": "workspace:*",
+    "@app-factory/skill-copilot-cli": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8",
+    "nock": "^13.5.6",
+    "execa": "^9.5.2"
+  }
+}

@@ -1,1 +1,1 @@
-export { installGhExtension, EXTENSION_SCRIPT } from './install.js';
+export { installGhExtension, EXTENSION_SCRIPT, EXTENSION_MANIFEST } from './install.js';

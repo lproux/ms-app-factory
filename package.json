@@ -10,9 +10,10 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "lint": "biome check .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:integration": "pnpm --filter @app-factory/integration-tests test",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
