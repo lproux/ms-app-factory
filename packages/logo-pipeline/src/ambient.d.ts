@@ -36,3 +36,4 @@ declare module 'undici' {
 
 declare module 'openai';
 declare module '@azure/openai';
+declare module '@aws-sdk/client-bedrock-runtime';

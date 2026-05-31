@@ -35,16 +35,27 @@ describe('buildLogoSet', () => {
     expect(meta.width).toBe(192);
   });
 
-  it('throws LOGO_MISSING when no source and provider=skip', async () => {
+  it('throws LOGO_MISSING when no source and LOGO_PROVIDER=skip', async () => {
     let caught: AppFactoryError | undefined;
     try {
-      await buildLogoSet({ provider: 'skip' });
+      await buildLogoSet({ env: { LOGO_PROVIDER: 'skip' } });
     } catch (err) {
       caught = err as AppFactoryError;
     }
     expect(caught).toBeInstanceOf(AppFactoryError);
     expect(caught?.code).toBe('LOGO_MISSING');
     expect(caught?.recoverable).toBe(true);
+  });
+
+  it('throws LOGO_MISSING when no source and LOGO_PROVIDER is unset', async () => {
+    let caught: AppFactoryError | undefined;
+    try {
+      await buildLogoSet({ env: {} });
+    } catch (err) {
+      caught = err as AppFactoryError;
+    }
+    expect(caught).toBeInstanceOf(AppFactoryError);
+    expect(caught?.code).toBe('LOGO_MISSING');
   });
 
   it('verifies the fixture file is a real PNG (sanity check)', async () => {
