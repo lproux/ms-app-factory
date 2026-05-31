@@ -89,6 +89,18 @@ export const FactoryContext = z.object({
       maxRounds: z.number().int().min(1).max(10).default(3),
     })
     .default({ shape: 'cross-model', maxRounds: 3 }),
+  /**
+   * Optional resume marker. When set, `runCopilotStudio`/`runTeamsApp` will
+   * seed the WBS executor's `done` set with the listed step ids and skip
+   * those step `run` callbacks; the workers hydrate ctx fields from
+   * `stepArtifacts` before the WBS executes. Set by the CLI's
+   * `--resume <runId>` flag — runtime callers normally leave this unset.
+   *
+   * Stored as a passthrough `z.unknown()` to avoid baking the full
+   * `Checkpoint` shape into `@app-factory/shared` (which would create a
+   * dependency cycle on `@app-factory/orchestrator`).
+   */
+  resumeFromCheckpoint: z.unknown().optional(),
 });
 export type FactoryContext = z.infer<typeof FactoryContext>;
 

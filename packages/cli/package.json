@@ -18,6 +18,7 @@
   "dependencies": {
     "@app-factory/copilot-studio": "workspace:*",
     "@app-factory/elicitation": "workspace:*",
+    "@app-factory/orchestrator": "workspace:*",
     "@app-factory/shared": "workspace:*",
     "@app-factory/teams-app": "workspace:*",
     "@inquirer/prompts": "^7.10.1",

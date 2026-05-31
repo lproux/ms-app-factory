@@ -11,7 +11,12 @@ import {
   type RunResult,
   type SecretRef,
 } from '@app-factory/shared';
-import { execute, type Step } from '@app-factory/orchestrator';
+import {
+  execute,
+  saveCheckpoint,
+  type Checkpoint,
+  type Step,
+} from '@app-factory/orchestrator';
 import { finalizeRun, type CostSuggestion } from '@app-factory/secret-store';
 import { getCredential } from '@app-factory/auth-broker';
 import {
@@ -626,13 +631,76 @@ const steps: Step<TACtx>[] = [
   },
 ];
 
+/**
+ * Project the resumable subset of TACtx for a given step id. Steps with no
+ * resumable state (smoke tests, judge panels, emit-secrets) return
+ * `undefined` — they should always re-run on resume.
+ */
+function collectTAStepArtifact(id: string, ctx: TACtx): unknown {
+  switch (id) {
+    case 'B2-scaffold':
+      return ctx.project ? { project: ctx.project } : undefined;
+    case 'B3-azure-rg':
+      return ctx.azure ? { azure: ctx.azure } : undefined;
+    case 'B4-sp':
+      return ctx.sp ? { sp: ctx.sp } : undefined;
+    case 'B6-registrations':
+      return ctx.entra || ctx.bot ? { entra: ctx.entra, bot: ctx.bot } : undefined;
+    // B7-B11 are boolean done markers — completedStepIds already records the
+    // "done" fact, so the payload only needs to be non-undefined to round-trip.
+    case 'B7-provision':
+    case 'B8-deploy':
+    case 'B9-package':
+    case 'B10-validate':
+    case 'B11-publish':
+      return { done: true };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Rehydrate ctx fields from a previously-persisted stepArtifacts map. Called
+ * once, before the WBS loop, when resuming.
+ */
+function hydrateTACtxFromCheckpoint(ctx: TACtx, artifacts: Record<string, unknown>): void {
+  const b2 = artifacts['B2-scaffold'] as { project?: ProjectInfo } | undefined;
+  if (b2?.project) ctx.project = b2.project;
+
+  const b3 = artifacts['B3-azure-rg'] as { azure?: AzureInfo } | undefined;
+  if (b3?.azure) ctx.azure = b3.azure;
+
+  const b4 = artifacts['B4-sp'] as { sp?: SpInfo } | undefined;
+  if (b4?.sp) ctx.sp = b4.sp;
+
+  const b6 = artifacts['B6-registrations'] as { entra?: EntraInfo; bot?: BotInfo } | undefined;
+  if (b6?.entra) ctx.entra = b6.entra;
+  if (b6?.bot) ctx.bot = b6.bot;
+  // B7-B11 markers carry no payload to hydrate — completedStepIds already
+  // tells the WBS executor to skip them.
+}
+
 export async function runTeamsApp(fctx: FactoryContext): Promise<RunResult> {
   const ctx: TACtx = { fctx, artifacts: [], secrets: [], warnings: [] };
   const log_ = log.child({ runId: fctx.runId, recipe: fctx.recipe });
   log_.info('starting Teams App WBS');
 
+  const resume = (fctx.resumeFromCheckpoint as Checkpoint | null | undefined) ?? null;
+  if (resume) {
+    log_.info({ completed: resume.completedStepIds }, 'resuming Teams App WBS from checkpoint');
+  }
+
   await execute(steps, ctx, {
     planOnly: fctx.planOnly,
+    runId: fctx.runId,
+    recipe: fctx.recipe,
+    workdir: fctx.workdir,
+    resumeFromCheckpoint: resume,
+    hydrateFromCheckpoint: (artifacts) => hydrateTACtxFromCheckpoint(ctx, artifacts),
+    collectStepArtifacts: (id, c) => collectTAStepArtifact(id, c as TACtx),
+    onCheckpoint: async (cp) => {
+      await saveCheckpoint(fctx.workdir, cp);
+    },
     onStep: (id, phase, err) => log_.info({ id, phase, err: err?.message }, `step:${id}:${phase}`),
   });
 

@@ -31,6 +31,10 @@ program
     '--reveal-secrets',
     'Embed raw secret material into the paste bundle. Default is redacted placeholders so the bundle is safe to log/share. Real secrets always live in the OS keyring + optional Key Vault.',
   )
+  .option(
+    '--resume <runId>',
+    'Resume a previously-halted run from its checkpoint at <workdir>/state.json. Skips the doctor preflight and any steps marked done in the checkpoint.',
+  )
   .action(async (opts) => {
     const answers: Record<string, string> = {};
     for (const kv of (opts.answer ?? []) as string[]) {
@@ -43,9 +47,10 @@ program
     }
     try {
       // Preflight: run doctor checks scoped to this recipe before elicitation,
-      // unless the user explicitly opts out. This prevents the "90s into a live
-      // run before discovering pac is missing" footgun the UX critic flagged.
-      if (!opts.skipDoctor) {
+      // unless the user explicitly opts out OR is resuming an existing run
+      // (we assume the same machine ran it the first time, so any missing
+      // tool would have already failed the original invocation).
+      if (!opts.skipDoctor && !opts.resume) {
         const recipe = await resolvePreflightRecipe(opts.recipe, opts.recipeFile);
         const report = await runDoctor({ recipe });
         if (!opts.json) printDoctorReport(report);
@@ -68,6 +73,7 @@ program
         nonInteractive: opts.nonInteractive,
         answers,
         revealSecrets: opts.revealSecrets,
+        resume: opts.resume,
       });
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));

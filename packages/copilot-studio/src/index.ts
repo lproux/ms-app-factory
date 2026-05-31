@@ -10,7 +10,12 @@ import {
   type RunResult,
   type SecretRef,
 } from '@app-factory/shared';
-import { execute, type Step } from '@app-factory/orchestrator';
+import {
+  execute,
+  saveCheckpoint,
+  type Checkpoint,
+  type Step,
+} from '@app-factory/orchestrator';
 import { finalizeRun } from '@app-factory/secret-store';
 import { buildLogoSet } from '@app-factory/logo-pipeline';
 import { getCredential } from '@app-factory/auth-broker';
@@ -434,15 +439,73 @@ const steps: Step<CSCtx>[] = [
   },
 ];
 
+/**
+ * Project the resumable subset of CSCtx for a given step id. Steps with no
+ * resumable state return `undefined`. This is the inverse of
+ * `hydrateCSCtxFromCheckpoint`.
+ */
+function collectCSStepArtifact(id: string, ctx: CSCtx): unknown {
+  switch (id) {
+    case 'A2-resolve-environment':
+      return ctx.environment ? { environment: ctx.environment } : undefined;
+    case 'A3-solution-skeleton':
+      return ctx.solutionDir || ctx.solutionZip || ctx.agentDef
+        ? { solutionDir: ctx.solutionDir, solutionZip: ctx.solutionZip, agentDef: ctx.agentDef }
+        : undefined;
+    case 'A9-publish':
+      return ctx.agentRecordId || ctx.invokeUrl
+        ? { agentRecordId: ctx.agentRecordId, invokeUrl: ctx.invokeUrl }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Rehydrate ctx fields from a previously-persisted stepArtifacts map. Called
+ * once, before the WBS loop, when resuming.
+ */
+function hydrateCSCtxFromCheckpoint(ctx: CSCtx, artifacts: Record<string, unknown>): void {
+  const a2 = artifacts['A2-resolve-environment'] as { environment?: PacEnv } | undefined;
+  if (a2?.environment) ctx.environment = a2.environment;
+
+  const a3 = artifacts['A3-solution-skeleton'] as
+    | { solutionDir?: string; solutionZip?: string; agentDef?: AgentDefinition }
+    | undefined;
+  if (a3?.solutionDir) ctx.solutionDir = a3.solutionDir;
+  if (a3?.solutionZip) ctx.solutionZip = a3.solutionZip;
+  if (a3?.agentDef) ctx.agentDef = a3.agentDef;
+
+  const a9 = artifacts['A9-publish'] as
+    | { agentRecordId?: string; invokeUrl?: string }
+    | undefined;
+  if (a9?.agentRecordId) ctx.agentRecordId = a9.agentRecordId;
+  if (a9?.invokeUrl) ctx.invokeUrl = a9.invokeUrl;
+}
+
 export async function runCopilotStudio(fctx: FactoryContext): Promise<RunResult> {
   const ctx: CSCtx = { fctx, artifacts: [], secrets: [], warnings: [] };
   const log_ = log.child({ runId: fctx.runId, recipe: fctx.recipe });
   log_.info('starting Copilot Studio WBS');
 
+  const resume = (fctx.resumeFromCheckpoint as Checkpoint | null | undefined) ?? null;
+  if (resume) {
+    log_.info({ completed: resume.completedStepIds }, 'resuming Copilot Studio WBS from checkpoint');
+  }
+
   const errors: string[] = [];
   try {
     await execute(steps, ctx, {
       planOnly: fctx.planOnly,
+      runId: fctx.runId,
+      recipe: fctx.recipe,
+      workdir: fctx.workdir,
+      resumeFromCheckpoint: resume,
+      hydrateFromCheckpoint: (artifacts) => hydrateCSCtxFromCheckpoint(ctx, artifacts),
+      collectStepArtifacts: (id, c) => collectCSStepArtifact(id, c as CSCtx),
+      onCheckpoint: async (cp) => {
+        await saveCheckpoint(fctx.workdir, cp);
+      },
       onStep: (id, phase, err) => log_.info({ id, phase, err: err?.message }, `step:${id}:${phase}`),
     });
   } catch (err) {

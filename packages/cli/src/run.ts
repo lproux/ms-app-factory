@@ -10,6 +10,11 @@ import {
 import { runCopilotStudio } from '@app-factory/copilot-studio';
 import { runTeamsApp } from '@app-factory/teams-app';
 import {
+  checkpointPath,
+  loadCheckpoint,
+  type Checkpoint,
+} from '@app-factory/orchestrator';
+import {
   elicit,
   getRecipe,
   renderPlanMarkdown,
@@ -19,6 +24,7 @@ import {
 } from '@app-factory/elicitation';
 
 const log = createLogger('cli');
+const resumeLog = createLogger('cli:resume');
 
 export interface RunArgs {
   recipe: string;
@@ -28,6 +34,13 @@ export interface RunArgs {
   answers?: Answers;
   nonInteractive?: boolean;
   revealSecrets?: boolean;
+  /**
+   * Resume the run with this id. The CLI looks up `<workdir>/state.json`
+   * (workdir falls back to `<cwd>/.app-factory/<runId>` when --workdir is
+   * not passed). When present, the doctor preflight is skipped — we assume
+   * the same machine ran the original.
+   */
+  resume?: string;
 }
 
 async function ciAsk(q: Question, _answers: Answers): Promise<unknown> {
@@ -63,12 +76,39 @@ async function interactiveAsk(q: Question, _answers: Answers): Promise<unknown> 
 
 export async function run(args: RunArgs): Promise<RunResult> {
   const recipe = await loadRecipe(args);
-  const ask = args.nonInteractive ? ciAsk : interactiveAsk;
-  const answers = await elicit({ recipe, initialAnswers: args.answers ?? {}, ask });
 
-  const runId = nanoid(10);
-  const workdir = args.workdir ?? path.join(process.cwd(), '.app-factory', runId);
-  await fs.mkdir(workdir, { recursive: true });
+  // Resume path: short-circuit elicitation in non-interactive mode (we
+  // trust the existing checkpoint to carry recipe-derived state) and reuse
+  // the existing workdir. We still respect --workdir if explicitly
+  // supplied; otherwise we derive `<cwd>/.app-factory/<runId>`.
+  let resumeFromCheckpoint: Checkpoint | null = null;
+  let runId: string;
+  let workdir: string;
+  if (args.resume) {
+    runId = args.resume;
+    workdir = args.workdir ?? path.join(process.cwd(), '.app-factory', runId);
+    const cpFile = checkpointPath(workdir);
+    const cp = await loadCheckpoint(workdir);
+    if (!cp) {
+      throw new AppFactoryError(
+        'CLI_RESUME_NOT_FOUND',
+        `no checkpoint at ${cpFile}. Run \`app-factory list-runs\` to see resumable runs, or drop --resume to start fresh.`,
+        { recoverable: true, details: { runId, workdir, checkpointPath: cpFile } },
+      );
+    }
+    resumeFromCheckpoint = cp;
+    resumeLog.info(
+      { runId, completed: cp.completedStepIds.length, workdir },
+      'resuming from checkpoint',
+    );
+  } else {
+    runId = nanoid(10);
+    workdir = args.workdir ?? path.join(process.cwd(), '.app-factory', runId);
+    await fs.mkdir(workdir, { recursive: true });
+  }
+
+  const ask = args.nonInteractive || args.resume ? ciAsk : interactiveAsk;
+  const answers = await elicit({ recipe, initialAnswers: args.answers ?? {}, ask });
 
   if (args.plan) {
     const planMd = renderPlanMarkdown(recipe, answers);
@@ -131,6 +171,7 @@ export async function run(args: RunArgs): Promise<RunResult> {
       powerPlatformEnvironment: stringOrUndef(answers['environment']),
     },
     emit: { keyring: true, revealSecrets: args.revealSecrets === true },
+    ...(resumeFromCheckpoint ? { resumeFromCheckpoint } : {}),
   });
 
   if (recipe.target === 'copilot-studio') return runCopilotStudio(fctx);
