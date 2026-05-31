@@ -1,6 +1,6 @@
 import { AppFactoryError, createLogger } from '@app-factory/shared';
 
-const log = createLogger('portal:computer-use');
+const log = createLogger('portal-automation:computer-use');
 
 export interface ComputerUseTask {
   goal: string;
@@ -10,6 +10,44 @@ export interface ComputerUseTask {
 
 const COMPUTER_USE_MODEL = 'claude-sonnet-4-5-20250929';
 const COMPUTER_USE_BETA = 'computer-use-2025-01-24';
+
+/**
+ * Keys whose values look like credentials, tokens or other secret material.
+ * Matches case-insensitively: `secret`, `password`, `token`, `key`,
+ * `client_secret`/`clientSecret`, `user_code`/`userCode`, `api_key`/`apiKey`.
+ *
+ * Used by {@link redactSecrets} to scrub `task.context` before it is
+ * embedded in an Anthropic API payload. A trace.zip or upstream model log
+ * would otherwise capture passwords typed by the orchestrator verbatim.
+ */
+export const SECRET_KEY_PATTERN = /secret|password|token|key|client_?secret|user_?code|api_?key/i;
+
+const REDACTED_PLACEHOLDER = '<redacted>';
+
+/**
+ * Recursively walk a value and replace the values of any object keys matching
+ * {@link SECRET_KEY_PATTERN} with the literal string `<redacted>`. Arrays are
+ * mapped element-wise; primitives are returned unchanged. The input is not
+ * mutated — a fresh structure is returned so the original `task.context` can
+ * still be used internally by the caller.
+ */
+export function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSecrets(item));
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (SECRET_KEY_PATTERN.test(k)) {
+        out[k] = REDACTED_PLACEHOLDER;
+      } else {
+        out[k] = redactSecrets(v);
+      }
+    }
+    return out;
+  }
+  return value;
+}
 
 export async function runComputerUseTask(task: ComputerUseTask): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -31,6 +69,8 @@ export async function runComputerUseTask(task: ComputerUseTask): Promise<string>
   // biome-ignore lint/suspicious/noExplicitAny: SDK client shape varies by version
   const client = new Anthropic({ apiKey }) as any;
 
+  const safeContext = redactSecrets(task.context ?? {});
+
   // TODO: replace this single-turn stub with the full tool-use loop
   // (screenshot → model → action → screenshot → ...) once the package is
   // wired into the master orchestrator end-to-end. The exact API surface
@@ -51,7 +91,7 @@ export async function runComputerUseTask(task: ComputerUseTask): Promise<string>
     messages: [
       {
         role: 'user',
-        content: `Goal: ${task.goal}\nURL: ${task.url ?? '(none provided)'}\nContext: ${JSON.stringify(task.context ?? {})}`,
+        content: `Goal: ${task.goal}\nURL: ${task.url ?? '(none provided)'}\nContext: ${JSON.stringify(safeContext)}`,
       },
     ],
     betas: [COMPUTER_USE_BETA],
