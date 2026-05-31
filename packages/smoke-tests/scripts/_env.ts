@@ -130,8 +130,10 @@ export async function buildSmokeContext(opts: {
     auth: { mode: 'sp', spClientId: opts.env.clientId },
     emit: {
       keyring: false,
+      revealSecrets: false,
       ...(opts.env.keyVaultUrl ? { keyVault: opts.env.keyVaultUrl } : {}),
     },
+    judge: { shape: 'cross-model', maxRounds: 3 },
   };
 }
 
