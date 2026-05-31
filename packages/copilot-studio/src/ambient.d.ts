@@ -26,10 +26,74 @@ declare module 'simple-git' {
 }
 
 declare module 'mammoth' {
-  export function convertToMarkdown(input: { path?: string; buffer?: Buffer }): Promise<{
+  export function convertToHtml(input: { path?: string; buffer?: Buffer }): Promise<{
     value: string;
     messages: unknown[];
   }>;
+  export function extractRawText(input: { path?: string; buffer?: Buffer }): Promise<{
+    value: string;
+    messages: unknown[];
+  }>;
+}
+
+declare module 'pdf-parse' {
+  interface PdfData {
+    text: string;
+    numpages: number;
+    info: unknown;
+    metadata: unknown;
+    version: string;
+  }
+  function pdfParse(buffer: Buffer | Uint8Array, opts?: Record<string, unknown>): Promise<PdfData>;
+  export = pdfParse;
+}
+
+declare module '@aws-sdk/client-s3' {
+  export interface S3ListObjectsV2Output {
+    Contents?: Array<{ Key?: string; Size?: number }>;
+    IsTruncated?: boolean;
+    NextContinuationToken?: string;
+  }
+  export interface S3GetObjectOutput {
+    Body?: { transformToByteArray(): Promise<Uint8Array> } & AsyncIterable<Uint8Array>;
+    ContentType?: string;
+  }
+  export class S3Client {
+    constructor(config?: Record<string, unknown>);
+    send<T = unknown>(command: unknown): Promise<T>;
+    destroy(): void;
+  }
+  export class ListObjectsV2Command {
+    constructor(input: { Bucket: string; Prefix?: string; ContinuationToken?: string; MaxKeys?: number });
+  }
+  export class GetObjectCommand {
+    constructor(input: { Bucket: string; Key: string });
+  }
+}
+
+declare module '@aws-sdk/credential-providers' {
+  import type { TokenCredential } from '@azure/identity';
+  export function fromIni(opts?: { profile?: string }): unknown;
+  export function fromEnv(): unknown;
+  export function fromNodeProviderChain(opts?: Record<string, unknown>): unknown;
+  // Suppress unused import warning
+  export type _Unused = TokenCredential;
+}
+
+declare module '@google-cloud/storage' {
+  export interface GcsFile {
+    name: string;
+    download(): Promise<[Buffer]>;
+  }
+  export interface GcsBucket {
+    getFiles(opts?: { prefix?: string; maxResults?: number; pageToken?: string; autoPaginate?: boolean }):
+      Promise<[GcsFile[], unknown, { nextPageToken?: string } | undefined]>;
+    file(name: string): GcsFile;
+  }
+  export class Storage {
+    constructor(opts?: { projectId?: string; keyFilename?: string });
+    bucket(name: string): GcsBucket;
+  }
 }
 
 declare module '@microsoft/microsoft-graph-client' {

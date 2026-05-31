@@ -16,21 +16,27 @@
     "@app-factory/shared": "workspace:*",
     "@app-factory/orchestrator": "workspace:*",
     "@app-factory/auth-broker": "workspace:*",
+    "@app-factory/portal-automation": "workspace:*",
     "@app-factory/secret-store": "workspace:*",
     "@app-factory/logo-pipeline": "workspace:*",
     "@app-factory/judge-panel": "workspace:*",
+    "@aws-sdk/client-s3": "^3.658.0",
+    "@aws-sdk/credential-providers": "^3.658.0",
     "@azure/identity": "^4.5.0",
+    "@google-cloud/storage": "^7.13.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "isomorphic-fetch": "^3.0.0",
     "execa": "^9.5.2",
     "adm-zip": "^0.5.16",
     "simple-git": "^3.27.0",
     "mammoth": "^1.9.0",
+    "pdf-parse": "^1.1.1",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
     "@types/isomorphic-fetch": "^0.0.39",
+    "@types/pdf-parse": "^1.1.4",
     "vitest": "^2.1.8"
   }
 }
