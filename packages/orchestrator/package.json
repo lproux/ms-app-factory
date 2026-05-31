@@ -19,7 +19,7 @@
     "nanoid": "^5.0.9"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
+    "tsx": "^4.22.3",
     "vitest": "^2.1.8"
   }
 }
