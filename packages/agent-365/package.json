@@ -1,5 +1,5 @@
 {
-  "name": "@app-factory/teams-app",
+  "name": "@app-factory/agent-365",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,12 +16,7 @@
     "@app-factory/shared": "workspace:*",
     "@app-factory/orchestrator": "workspace:*",
     "@app-factory/auth-broker": "workspace:*",
-    "@app-factory/secret-store": "workspace:*",
-    "@app-factory/azure-ops": "workspace:*",
-    "@app-factory/judge-panel": "workspace:*",
-    "@app-factory/agent-365": "workspace:*",
-    "execa": "^9.5.2",
-    "yaml": "^2.7.0"
+    "execa": "^9.5.2"
   },
   "devDependencies": {
     "vitest": "^2.1.8"

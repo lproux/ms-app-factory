@@ -37,8 +37,23 @@ import {
   type Persona,
 } from '@app-factory/judge-panel';
 import * as atk from './atk.js';
+import {
+  agent365BlueprintCreate,
+  agent365Publish,
+} from '@app-factory/agent-365';
 
 const log = createLogger('teams-app');
+
+/**
+ * Pick the scaffold engine for the current recipe. Agent 365 recipes use the
+ * Microsoft Agent 365 CLI (`agent365 ...`); everything else stays on the
+ * Teams Toolkit CLI (`atk ...`).
+ */
+type ScaffoldKind = 'atk' | 'agent-365';
+
+function pickScaffold(ctx: TACtx): ScaffoldKind {
+  return ctx.fctx.recipe === 'teams-agent-365' ? 'agent-365' : 'atk';
+}
 
 interface ProjectInfo {
   projectPath: string;
@@ -96,8 +111,9 @@ const BOT_REDIRECT_URI = 'https://token.botframework.com/.auth/web/redirect';
  * `teams-bot-basic` flows are unaffected.
  *
  * Note: `teams-agent-365` is included for completeness but the B2 step
- * short-circuits before reaching `atk new` for that recipe — the Agent 365
- * CLI path is a future bucket.
+ * routes through the Agent 365 CLI (`agent365 blueprint create`) instead of
+ * `atk new` — the template/capability values here are advisory only for that
+ * recipe.
  */
 export interface AtkTemplateChoice {
   template: string;
@@ -149,40 +165,46 @@ function requireSp(ctx: TACtx): SpInfo {
 const steps: Step<TACtx>[] = [
   {
     id: 'B2-scaffold',
-    description: 'Scaffold project from atk template + overlays.',
+    description: 'Scaffold project from atk template or Agent 365 blueprint.',
     run: async (ctx) =>
       span('B2', async () => {
         const appName = ctx.fctx.brand?.name ?? 'teams-bot';
         const folder = ctx.fctx.workdir;
         await mkdir(folder, { recursive: true });
         const projectPath = join(folder, appName);
-        const tmpl = selectAtkTemplate(ctx.fctx.recipe);
+        const scaffold = pickScaffold(ctx);
 
-        // Agent 365 does not use the atk CLI — it has its own m365agents CLI
-        // pipeline that is owned by a future bucket. For now we record the
-        // intent + emit a recoverable ProvisioningError so the orchestrator
-        // can surface a clear "not yet wired" message.
-        if (ctx.fctx.recipe === 'teams-agent-365') {
-          log.info(
-            { recipe: ctx.fctx.recipe, projectPath, appName },
-            'Agent 365 CLI path not yet wired',
-          );
+        if (scaffold === 'agent-365') {
+          // The recipe's `kbSourcesAgent365` answer is not yet plumbed through
+          // FactoryContext (no `answers` field); default to true to match the
+          // recipe default and the Agent 365 grounding-pipeline expectation.
+          // TODO: wire the elicited answer through once FactoryContext gains
+          // an `answers` map.
+          const kbSourcesAgent365 = true;
+          try {
+            await mkdir(projectPath, { recursive: true });
+            await agent365BlueprintCreate({ name: appName, projectPath, kbSourcesAgent365 });
+          } catch (err) {
+            if (err instanceof PortalRequiredError) {
+              ctx.warnings.push(
+                `agent365 CLI unavailable; portal fallback required: ${err.message}`,
+              );
+              throw err;
+            }
+            throw err;
+          }
           ctx.project = { projectPath, appName };
           ctx.artifacts.push({
             kind: 'teams-app',
             id: projectPath,
             displayName: appName,
-            metadata: { scaffold: 'agent-365-stub' },
+            metadata: { scaffold: 'agent-365', kbSourcesAgent365 },
           });
-          throw new ProvisioningError(
-            'Agent 365 CLI path not yet wired — scaffolding via the Agent 365 toolchain is a future bucket.',
-            {
-              recoverable: true,
-              details: { recipe: ctx.fctx.recipe, projectPath, appName },
-            },
-          );
+          log.info({ projectPath, appName, kbSourcesAgent365 }, 'B2 Agent 365 blueprint complete');
+          return;
         }
 
+        const tmpl = selectAtkTemplate(ctx.fctx.recipe);
         try {
           await atk.atkNew({
             template: tmpl.template,
@@ -372,6 +394,13 @@ const steps: Step<TACtx>[] = [
     run: async (ctx) =>
       span('B7', async () => {
         const project = requireProject(ctx);
+        if (pickScaffold(ctx) === 'agent-365') {
+          // Agent 365 collapses provision/deploy/package into a single
+          // `agent365 publish` invocation (see B11). B7/B8/B9 stay as
+          // breadcrumb log entries so the WBS graph is intact.
+          log.info('B7 provision: skipped (handled by agent365 publish in B11)');
+          return;
+        }
         try {
           await atk.atkProvision({ env: DEFAULT_ENV, projectPath: project.projectPath });
         } catch (err) {
@@ -396,6 +425,10 @@ const steps: Step<TACtx>[] = [
     run: async (ctx) =>
       span('B8', async () => {
         const project = requireProject(ctx);
+        if (pickScaffold(ctx) === 'agent-365') {
+          log.info('B8 deploy: skipped (handled by agent365 publish in B11)');
+          return;
+        }
         try {
           await atk.atkDeploy({ env: DEFAULT_ENV, projectPath: project.projectPath });
         } catch (err) {
@@ -415,6 +448,10 @@ const steps: Step<TACtx>[] = [
     run: async (ctx) =>
       span('B9', async () => {
         const project = requireProject(ctx);
+        if (pickScaffold(ctx) === 'agent-365') {
+          log.info('B9 package: skipped (handled by agent365 publish in B11)');
+          return;
+        }
         const outDir = join(project.projectPath, 'appPackage', 'build');
         await atk.atkPackage({ env: DEFAULT_ENV, projectPath: project.projectPath, outDir });
         log.info({ outDir }, 'B9 package complete');
@@ -427,6 +464,13 @@ const steps: Step<TACtx>[] = [
     run: async (ctx) =>
       span('B10', async () => {
         const project = requireProject(ctx);
+        if (pickScaffold(ctx) === 'agent-365') {
+          // Agent 365 blueprints validate their own manifest as part of
+          // `agent365 publish`; there is no equivalent free-standing
+          // `validate` subcommand in the CLI as of 0.2.x.
+          log.info('B10 validate: skipped for agent-365 recipe');
+          return;
+        }
         await atk.atkValidate({
           manifestPath: join(project.projectPath, 'appPackage', 'manifest.json'),
           projectPath: project.projectPath,
@@ -452,6 +496,19 @@ const steps: Step<TACtx>[] = [
     run: async (ctx) =>
       span('B11', async () => {
         const project = requireProject(ctx);
+        if (pickScaffold(ctx) === 'agent-365') {
+          try {
+            await agent365Publish({ env: DEFAULT_ENV, projectPath: project.projectPath });
+          } catch (err) {
+            if (err instanceof PortalRequiredError) {
+              ctx.warnings.push(`agent365 publish unavailable; portal fallback: ${err.message}`);
+              throw err;
+            }
+            throw err;
+          }
+          log.info('B11 agent365 publish complete');
+          return;
+        }
         await atk.atkUpdateTeamsApp({ env: DEFAULT_ENV, projectPath: project.projectPath });
         log.info('B11 publish complete');
       }),
