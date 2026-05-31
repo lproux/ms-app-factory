@@ -1,8 +1,33 @@
+/**
+ * packages/judge-panel/test/auto-improve.test.ts
+ *
+ * Verifies the "judge-panel veto + auto-improve loop" scenario from the
+ * App Factory plan (see Phase-3 verification #4):
+ *
+ *   "Inject a deliberate KB-grounding regression; verify the panel catches
+ *    it, the auto-improve loop produces a fix, and the second pass clears."
+ *
+ * F5 reported that the default A11/B13 WBS steps call `panel.review` once
+ * and store the result — they do NOT wire `autoImprove` in. This test
+ * therefore exercises `autoImprove` (the exported function from
+ * `packages/judge-panel/src/auto-improve.ts`) DIRECTLY against three
+ * deterministic in-process judges. No network.
+ */
+
 import { JudgeVetoError } from '@app-factory/shared';
 import { describe, expect, it } from 'vitest';
 import { autoImprove } from '../src/auto-improve.js';
 import { JudgePanel } from '../src/panel.js';
 import type { Judge, JudgeArtifact, Persona, Verdict } from '../src/types.js';
+import {
+  buildBrokenFixture,
+  buildRepairedFixture,
+  type SeedAgentArtifact,
+} from '../../../tools/seed-veto-fixture.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 interface ScriptedReturn {
   approved: boolean;
@@ -10,6 +35,7 @@ interface ScriptedReturn {
   repairNotes?: string;
 }
 
+/** Judge that returns a pre-scripted sequence of verdicts, one per review(). */
 function scriptedJudge(id: string, persona: Persona, script: ScriptedReturn[]): Judge {
   let call = 0;
   return {
@@ -32,52 +58,177 @@ function scriptedJudge(id: string, persona: Persona, script: ScriptedReturn[]): 
   };
 }
 
-const INITIAL_ARTIFACT: JudgeArtifact = {
-  kind: 'wbs-step',
-  id: 'A11',
-  summary: 'first draft',
-};
+/**
+ * A judge that inspects the artifact's `payload.generativeAnswers.sources`
+ * and vetoes when the array is empty. This is the "kb-grounding" rule we
+ * want the panel to enforce on a real CS agent artifact.
+ */
+function kbGroundingJudge(id: string, persona: Persona): Judge {
+  return {
+    id,
+    persona,
+    async review(artifact: JudgeArtifact): Promise<Verdict> {
+      const ga = (artifact.payload as { generativeAnswers?: { sources?: unknown[] } } | undefined)
+        ?.generativeAnswers;
+      const sources = Array.isArray(ga?.sources) ? ga.sources : [];
+      if (sources.length === 0) {
+        return {
+          judge: id,
+          persona,
+          approved: false,
+          reason: 'veto: kb-grounding — generativeAnswers.sources is empty',
+          repairNotes:
+            'Wire generativeAnswers.sources from kbSources before publishing (WBS-A5/A6).',
+        };
+      }
+      return {
+        judge: id,
+        persona,
+        approved: true,
+        score: 0.9,
+        reason: `kb-grounding ok: ${sources.length} source(s) wired`,
+      };
+    },
+  };
+}
 
-describe('autoImprove', () => {
-  it('returns once the panel approves; reports the number of rounds taken', async () => {
-    const cost = scriptedJudge('copilot:cost', 'cost', [
-      { approved: false, repairNotes: 'use cheaper SKU' },
-      { approved: false, repairNotes: 'still expensive' },
-      { approved: true },
-    ]);
-    const architect = scriptedJudge('claude:architect', 'architect', [
-      { approved: true },
-      { approved: true },
-      { approved: true },
-    ]);
-    const panel = new JudgePanel({ judges: [cost, architect], policy: { vetoOn: [] } });
+/** Cost judge that always approves cs-agent artifacts (no expensive SKUs here). */
+function permissiveCostJudge(id: string): Judge {
+  return {
+    id,
+    persona: 'cost',
+    async review(): Promise<Verdict> {
+      return { judge: id, persona: 'cost', approved: true, score: 0.85, reason: 'within budget' };
+    },
+  };
+}
+
+/** Architect judge that approves any cs-agent with at least one topic. */
+function architectJudge(id: string): Judge {
+  return {
+    id,
+    persona: 'architect',
+    async review(artifact: JudgeArtifact): Promise<Verdict> {
+      const topics = (artifact.payload as { topics?: unknown[] } | undefined)?.topics ?? [];
+      if (!Array.isArray(topics) || topics.length === 0) {
+        return {
+          judge: id,
+          persona: 'architect',
+          approved: false,
+          reason: 'no topics defined',
+          repairNotes: 'Add at least a Greeting and Fallback topic.',
+        };
+      }
+      return {
+        judge: id,
+        persona: 'architect',
+        approved: true,
+        score: 0.92,
+        reason: 'topics + instructions look coherent',
+      };
+    },
+  };
+}
+
+/** Convert a SeedAgentArtifact (rich JSON) to the JudgeArtifact contract. */
+function toJudgeArtifact(seed: SeedAgentArtifact): JudgeArtifact {
+  return {
+    kind: seed.kind,
+    id: seed.id,
+    displayName: seed.displayName,
+    summary: seed.summary,
+    payload: seed.payload as unknown as Record<string, unknown>,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('judge-panel veto + autoImprove loop (kb-grounding regression)', () => {
+  it('vetoes a CS agent with empty generativeAnswers.sources via a "veto: kb-grounding" vote', async () => {
+    const panel = new JudgePanel({
+      judges: [
+        architectJudge('claude:architect'),
+        // Security persona enforces the KB-grounding contract: an ungrounded
+        // bot can hallucinate, which is a hard veto under the panel policy.
+        kbGroundingJudge('cs:security', 'security'),
+        permissiveCostJudge('copilot:cost'),
+      ],
+    });
+
+    const brokenArtifact = toJudgeArtifact(buildBrokenFixture());
+    const result = await panel.review(brokenArtifact);
+
+    expect(result.vetoed).toBe(true);
+    expect(result.verdicts).toHaveLength(3);
+    const vetoVote = result.verdicts.find((v) => v.reason.includes('veto: kb-grounding'));
+    expect(vetoVote).toBeDefined();
+    expect(vetoVote?.approved).toBe(false);
+    expect(vetoVote?.persona).toBe('security');
+    expect(result.repairNotes.some((n) => /kb-?grounding|kbSources|generativeAnswers/i.test(n))).toBe(
+      true,
+    );
+  });
+
+  it('autoImprove repairs the artifact and the second panel pass clears', async () => {
+    const panel = new JudgePanel({
+      judges: [
+        architectJudge('claude:architect'),
+        kbGroundingJudge('cs:security', 'security'),
+        permissiveCostJudge('copilot:cost'),
+      ],
+    });
+
+    const brokenArtifact = toJudgeArtifact(buildBrokenFixture());
 
     let regenCalls = 0;
-    const result = await autoImprove<{ revision: number }>({
+    const repairedFixture = buildRepairedFixture();
+    const repairedSources = repairedFixture.payload.generativeAnswers.sources;
+
+    const result = await autoImprove<SeedAgentArtifact>({
       panel,
-      initial: { input: { revision: 0 }, artifact: INITIAL_ARTIFACT },
+      initial: { input: buildBrokenFixture(), artifact: brokenArtifact },
       async regenerate(input, repairNotes) {
         regenCalls += 1;
-        expect(repairNotes.length).toBeGreaterThan(0);
-        const nextRevision = input.revision + 1;
-        return {
-          input: { revision: nextRevision },
-          artifact: {
-            ...INITIAL_ARTIFACT,
-            id: `${INITIAL_ARTIFACT.id}-r${nextRevision}`,
-            summary: `revision ${nextRevision}`,
+        // The auto-improve loop must hand us the panel's repairNotes so the
+        // regenerator knows WHAT to fix. Assert the kb-grounding note made it.
+        expect(repairNotes.some((n) => /kb-?grounding|kbSources/i.test(n))).toBe(true);
+        const fixed: SeedAgentArtifact = {
+          ...input,
+          id: `${input.id}:auto-improved`,
+          payload: {
+            ...input.payload,
+            generativeAnswers: {
+              enabled: true,
+              sources: repairedSources,
+            },
           },
         };
+        return { input: fixed, artifact: toJudgeArtifact(fixed) };
       },
     });
 
-    expect(result.rounds).toBe(3);
-    expect(regenCalls).toBe(2);
-    expect(result.input.revision).toBe(2);
-    expect(result.artifact.id).toBe('A11-r2');
+    expect(regenCalls).toBe(1);
+    expect(result.rounds).toBe(2);
+    // The repaired artifact has non-empty sources.
+    const finalSources = (
+      result.artifact.payload as { generativeAnswers?: { sources?: unknown[] } } | undefined
+    )?.generativeAnswers?.sources;
+    expect(Array.isArray(finalSources)).toBe(true);
+    expect((finalSources as unknown[]).length).toBeGreaterThan(0);
+    expect(finalSources).toEqual(repairedSources);
+
+    // Re-run the panel directly on the repaired artifact and assert pass.
+    const reRun = await panel.review(result.artifact);
+    expect(reRun.vetoed).toBe(false);
+    expect(reRun.rejections).toBe(0);
+    expect(reRun.approvals).toBe(3);
   });
 
   it('throws JudgeVetoError when maxRounds is reached without convergence', async () => {
+    // Regression coverage from the previous spec: the loop must not run
+    // forever; maxRounds=1 + a judge that always rejects must throw.
     const stubborn = scriptedJudge('claude:security', 'security', [
       { approved: false, reason: 'still leaking secrets', repairNotes: 'redact tokens' },
     ]);
@@ -88,14 +239,21 @@ describe('autoImprove', () => {
       autoImprove<number>({
         panel,
         maxRounds: 1,
-        initial: { input: 0, artifact: INITIAL_ARTIFACT },
+        initial: {
+          input: 0,
+          artifact: { kind: 'wbs-step', id: 'A11', summary: 'first draft' },
+        },
         async regenerate(input) {
           regenCalls += 1;
-          return { input: input + 1, artifact: INITIAL_ARTIFACT };
+          return {
+            input: input + 1,
+            artifact: { kind: 'wbs-step', id: 'A11', summary: 'first draft' },
+          };
         },
       }),
     ).rejects.toBeInstanceOf(JudgeVetoError);
 
+    // maxRounds=1 means the first failing review aborts BEFORE regenerate runs.
     expect(regenCalls).toBe(0);
   });
 });
