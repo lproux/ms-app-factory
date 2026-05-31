@@ -1,80 +1,50 @@
 import { execa, type Options as ExecaOptions } from 'execa';
+import { AppFactoryError } from '@app-factory/shared';
 import {
-  AppFactoryError,
-  PortalRequiredError,
-  ProvisioningError,
-  createLogger,
-} from '@app-factory/shared';
-import { spawn, type SpawnOptions, type WorkerHandle } from '@app-factory/orchestrator';
-
-const log = createLogger('teams-app:atk');
+  makeCliWrapper,
+  type SpawnOptions,
+  type WorkerHandle,
+} from '@app-factory/orchestrator';
 
 export const MIN_ATK_VERSION = '3.0.0';
-const ATK_BIN = 'atk';
-const ATK_PORTAL_URL = 'https://learn.microsoft.com/microsoftteams/platform/toolkit/teams-toolkit-cli';
+const ATK_PORTAL_URL =
+  'https://learn.microsoft.com/microsoftteams/platform/toolkit/teams-toolkit-cli';
 const INSTALL_HINT = 'npm install -g @microsoft/m365agentstoolkit-cli';
 
-export type AtkSpawnFn = (command: string, opts?: SpawnOptions) => Promise<WorkerHandle>;
+export type AtkSpawnFn = (
+  command: string,
+  opts?: SpawnOptions,
+) => Promise<WorkerHandle>;
 
-let _verifiedVersion: string | undefined;
+const atkRunner = makeCliWrapper({
+  bin: 'atk',
+  name: 'm365 agents toolkit',
+  minVersion: MIN_ATK_VERSION,
+  installHint: INSTALL_HINT,
+  portalUrl: ATK_PORTAL_URL,
+});
+
+// ---------------------------------------------------------------------------
+// Public version-detection surface (preserved for backwards compatibility).
+// ---------------------------------------------------------------------------
 
 export interface AssertAtkInstalledOptions {
   exec?: (file: string, args: string[], opts?: ExecaOptions) => ReturnType<typeof execa>;
 }
 
-export async function assertAtkInstalled(opts: AssertAtkInstalledOptions = {}): Promise<string> {
-  if (_verifiedVersion) return _verifiedVersion;
-  const exec = opts.exec ?? (execa as unknown as (file: string, args: string[], opts?: ExecaOptions) => ReturnType<typeof execa>);
-  try {
-    const result = await exec(ATK_BIN, ['--version'], { reject: false });
-    if (result.exitCode !== 0) {
-      throw new PortalRequiredError(
-        `atk CLI not available (exit ${result.exitCode}). Install with: ${INSTALL_HINT}`,
-        ATK_PORTAL_URL,
-        { details: { stderr: result.stderr, stdout: result.stdout, install: INSTALL_HINT } },
-      );
-    }
-    const version = String(result.stdout ?? '').trim();
-    _verifiedVersion = version;
-    if (!isVersionAtLeast(version, MIN_ATK_VERSION)) {
-      log.warn(
-        { version, required: MIN_ATK_VERSION },
-        'atk CLI version is older than expected; behavior may differ',
-      );
-    }
-    log.info({ version }, 'atk CLI detected');
-    return version;
-  } catch (err) {
-    if (err instanceof PortalRequiredError) throw err;
-    throw new PortalRequiredError(
-      `atk CLI not on PATH. Install with: ${INSTALL_HINT}`,
-      ATK_PORTAL_URL,
-      { cause: err, details: { install: INSTALL_HINT } },
-    );
-  }
+export async function assertAtkInstalled(
+  opts: AssertAtkInstalledOptions = {},
+): Promise<string> {
+  return atkRunner.detectVersion(opts);
 }
 
 export function _resetAtkVersionCache(): void {
-  _verifiedVersion = undefined;
+  atkRunner.resetVersionCache();
 }
 
-function isVersionAtLeast(actual: string, min: string): boolean {
-  const a = parseVersion(actual);
-  const m = parseVersion(min);
-  for (let i = 0; i < 3; i++) {
-    const av = a[i] ?? 0;
-    const mv = m[i] ?? 0;
-    if (av > mv) return true;
-    if (av < mv) return false;
-  }
-  return true;
-}
-
-function parseVersion(s: string): number[] {
-  const m = /(\d+)\.(\d+)\.(\d+)/.exec(s);
-  if (!m) return [0, 0, 0];
-  return [Number(m[1] ?? 0), Number(m[2] ?? 0), Number(m[3] ?? 0)];
-}
+// ---------------------------------------------------------------------------
+// Arg builders — pure functions, unit-tested directly.
+// ---------------------------------------------------------------------------
 
 export interface AtkNewOptions {
   template: string;
@@ -159,110 +129,95 @@ export function buildAtkPreviewArgs(opts: AtkPreviewOptions): string[] {
   return args;
 }
 
-interface RunAtkOptions {
-  name: string;
-  args: string[];
-  cwd: string;
-  successRegex: RegExp;
-  failureRegex?: RegExp;
-  timeoutMs?: number;
+// ---------------------------------------------------------------------------
+// Public wrappers — each one builds args + delegates to the shared runner.
+// ---------------------------------------------------------------------------
+
+interface AtkRunOpts {
   spawnFn?: AtkSpawnFn;
 }
 
-async function runAtkInTmux(opts: RunAtkOptions): Promise<string> {
-  const spawnFn = opts.spawnFn ?? spawn;
-  const failureRegex =
-    opts.failureRegex ?? /(error|failed|✖|✗)\b/i;
-  const timeoutMs = opts.timeoutMs ?? 20 * 60_000;
-
-  const argStr = opts.args.map(shellSingle).join(' ');
-  const cmd = `bash -lc ${shellSingle(`${ATK_BIN} ${argStr} 2>&1; echo "[atk-done:$?]"`)}`;
-  log.info({ name: opts.name, args: opts.args, cwd: opts.cwd }, 'spawning atk worker');
-
-  const handle = await spawnFn(cmd, { name: opts.name, cwd: opts.cwd });
-  try {
-    const buf = await handle.waitFor(/\[atk-done:\d+\]/, { timeoutMs, pollMs: 2_000 });
-    const exit = /\[atk-done:(\d+)\]/.exec(buf);
-    const exitCode = exit ? Number(exit[1]) : -1;
-    if (exitCode !== 0) {
-      throw new ProvisioningError(`atk ${opts.name} failed (exit ${exitCode})`, {
-        details: { args: opts.args, tail: buf.slice(-2000) },
-      });
-    }
-    if (failureRegex.test(buf) && !opts.successRegex.test(buf)) {
-      throw new ProvisioningError(`atk ${opts.name} reported failure markers in output`, {
-        details: { args: opts.args, tail: buf.slice(-2000) },
-      });
-    }
-    log.info({ name: opts.name }, 'atk completed');
-    return buf;
-  } catch (err) {
-    if (err instanceof ProvisioningError) throw err;
-    throw new ProvisioningError(`atk ${opts.name} did not complete`, {
-      cause: err,
-      details: { args: opts.args },
-    });
-  }
+function tmuxOpts(
+  name: string,
+  args: string[],
+  cwd: string,
+  successRegex: RegExp,
+  runOpts: AtkRunOpts,
+) {
+  const opts: Parameters<typeof atkRunner.runInTmux>[0] = {
+    name,
+    args,
+    cwd,
+    successRegex,
+  };
+  if (runOpts.spawnFn) opts.spawnFn = runOpts.spawnFn;
+  return opts;
 }
 
-const SUCCESS_REGEX = /(succeeded|completed|✓|installed teams app|published)/i;
-
-export async function atkNew(opts: AtkNewOptions, runOpts: { spawnFn?: AtkSpawnFn } = {}): Promise<void> {
+export async function atkNew(opts: AtkNewOptions, runOpts: AtkRunOpts = {}): Promise<void> {
   await assertAtkInstalled();
-  await runAtkInTmux({
-    name: 'atk-new',
-    args: buildAtkNewArgs(opts),
-    cwd: opts.folder,
-    successRegex: /(scaffolded|generated|created|completed|succeeded|✓)/i,
-    spawnFn: runOpts.spawnFn,
-  });
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      'atk-new',
+      buildAtkNewArgs(opts),
+      opts.folder,
+      /(scaffolded|generated|created|completed|succeeded|✓)/i,
+      runOpts,
+    ),
+  );
 }
 
 export async function atkProvision(
   opts: AtkProjectOptions,
-  runOpts: { spawnFn?: AtkSpawnFn } = {},
+  runOpts: AtkRunOpts = {},
 ): Promise<void> {
   await assertAtkInstalled();
-  await runAtkInTmux({
-    name: 'atk-provision',
-    args: buildAtkProvisionArgs(opts),
-    cwd: opts.projectPath,
-    successRegex: /provision(ing)?.*(succeeded|completed|✓)/i,
-    spawnFn: runOpts.spawnFn,
-  });
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      'atk-provision',
+      buildAtkProvisionArgs(opts),
+      opts.projectPath,
+      /provision(ing)?.*(succeeded|completed|✓)/i,
+      runOpts,
+    ),
+  );
 }
 
 export async function atkDeploy(
   opts: AtkProjectOptions,
-  runOpts: { spawnFn?: AtkSpawnFn } = {},
+  runOpts: AtkRunOpts = {},
 ): Promise<void> {
   await assertAtkInstalled();
-  await runAtkInTmux({
-    name: 'atk-deploy',
-    args: buildAtkDeployArgs(opts),
-    cwd: opts.projectPath,
-    successRegex: /deploy(ment)?.*(succeeded|completed|✓)/i,
-    spawnFn: runOpts.spawnFn,
-  });
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      'atk-deploy',
+      buildAtkDeployArgs(opts),
+      opts.projectPath,
+      /deploy(ment)?.*(succeeded|completed|✓)/i,
+      runOpts,
+    ),
+  );
 }
 
 export async function atkPackage(
   opts: AtkPackageOptions,
-  runOpts: { spawnFn?: AtkSpawnFn } = {},
+  runOpts: AtkRunOpts = {},
 ): Promise<void> {
   await assertAtkInstalled();
-  await runAtkInTmux({
-    name: 'atk-package',
-    args: buildAtkPackageArgs(opts),
-    cwd: opts.projectPath,
-    successRegex: /package.*(succeeded|completed|built|✓)/i,
-    spawnFn: runOpts.spawnFn,
-  });
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      'atk-package',
+      buildAtkPackageArgs(opts),
+      opts.projectPath,
+      /package.*(succeeded|completed|built|✓)/i,
+      runOpts,
+    ),
+  );
 }
 
 export async function atkValidate(
   opts: AtkValidateOptions,
-  runOpts: { spawnFn?: AtkSpawnFn } = {},
+  runOpts: AtkRunOpts = {},
 ): Promise<void> {
   await assertAtkInstalled();
   if (!opts.manifestPath && !opts.appPackagePath) {
@@ -271,43 +226,45 @@ export async function atkValidate(
       'atkValidate requires manifestPath or appPackagePath',
     );
   }
-  await runAtkInTmux({
-    name: opts.manifestPath ? 'atk-validate-manifest' : 'atk-validate-package',
-    args: buildAtkValidateArgs(opts),
-    cwd: opts.projectPath,
-    successRegex: /(validation|validate).*(succeeded|completed|passed|✓)/i,
-    spawnFn: runOpts.spawnFn,
-  });
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      opts.manifestPath ? 'atk-validate-manifest' : 'atk-validate-package',
+      buildAtkValidateArgs(opts),
+      opts.projectPath,
+      /(validation|validate).*(succeeded|completed|passed|✓)/i,
+      runOpts,
+    ),
+  );
 }
 
 export async function atkUpdateTeamsApp(
   opts: AtkProjectOptions,
-  runOpts: { spawnFn?: AtkSpawnFn } = {},
+  runOpts: AtkRunOpts = {},
 ): Promise<void> {
   await assertAtkInstalled();
-  await runAtkInTmux({
-    name: 'atk-update-teams-app',
-    args: buildAtkUpdateTeamsAppArgs(opts),
-    cwd: opts.projectPath,
-    successRegex: /(updated|published|succeeded|completed|installed teams app|✓)/i,
-    spawnFn: runOpts.spawnFn,
-  });
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      'atk-update-teams-app',
+      buildAtkUpdateTeamsAppArgs(opts),
+      opts.projectPath,
+      /(updated|published|succeeded|completed|installed teams app|✓)/i,
+      runOpts,
+    ),
+  );
 }
 
 export async function atkPreview(
   opts: AtkPreviewOptions,
-  runOpts: { spawnFn?: AtkSpawnFn } = {},
+  runOpts: AtkRunOpts = {},
 ): Promise<void> {
   await assertAtkInstalled();
-  await runAtkInTmux({
-    name: 'atk-preview',
-    args: buildAtkPreviewArgs(opts),
-    cwd: opts.projectPath,
-    successRegex: /(preview|listening|ready|started)/i,
-    spawnFn: runOpts.spawnFn,
-  });
-}
-
-function shellSingle(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
+  await atkRunner.runInTmux(
+    tmuxOpts(
+      'atk-preview',
+      buildAtkPreviewArgs(opts),
+      opts.projectPath,
+      /(preview|listening|ready|started)/i,
+      runOpts,
+    ),
+  );
 }

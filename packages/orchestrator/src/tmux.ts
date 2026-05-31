@@ -1,6 +1,7 @@
 import { execa } from 'execa';
 import { nanoid } from 'nanoid';
 import { AppFactoryError, createLogger } from '@app-factory/shared';
+import { shellQuoteSingle } from './shell.js';
 
 const log = createLogger('orchestrator:tmux');
 
@@ -49,10 +50,10 @@ export async function spawn(command: string, opts: SpawnOptions = {}): Promise<W
   const envPrefix = opts.env
     ? Object.entries(opts.env)
         .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => `${k}=${shellEscape(v as string)}`)
+        .map(([k, v]) => `${k}=${shellQuoteSingle(v as string)}`)
         .join(' ')
     : '';
-  const cwdPrefix = opts.cwd ? `cd ${shellEscape(opts.cwd)} && ` : '';
+  const cwdPrefix = opts.cwd ? `cd ${shellQuoteSingle(opts.cwd)} && ` : '';
   const fullCmd = `${cwdPrefix}${envPrefix ? envPrefix + ' ' : ''}${command}`;
 
   await tmux(['new-window', '-t', session, '-n', window, '-d', fullCmd]);
@@ -90,8 +91,4 @@ export async function spawn(command: string, opts: SpawnOptions = {}): Promise<W
     },
   };
   return handle;
-}
-
-function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }

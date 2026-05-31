@@ -1,5 +1,10 @@
 import { AppFactoryError, createLogger } from '@app-factory/shared';
-import { spawn, type SpawnOptions, type WorkerHandle } from '@app-factory/orchestrator';
+import {
+  spawn,
+  shellQuoteSingle,
+  type SpawnOptions,
+  type WorkerHandle,
+} from '@app-factory/orchestrator';
 
 const log = createLogger('azure-ops:pim');
 
@@ -49,7 +54,7 @@ export async function activatePim(opts: ActivatePimOptions): Promise<ActivatePim
     'echo "[pim] activation step finished"',
   ].join(' && ');
 
-  const cmd = `bash -lc ${shellSingle(script)}`;
+  const cmd = `bash -lc ${shellQuoteSingle(script)}`;
   log.info({ role: opts.roleName, justification: opts.justification }, 'spawning PIM activation worker');
 
   const handle = await spawnFn(cmd, { name: 'az-pim', session });
@@ -77,8 +82,4 @@ export async function activatePim(opts: ActivatePimOptions): Promise<ActivatePim
       /* ignore */
     }
   }
-}
-
-function shellSingle(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
