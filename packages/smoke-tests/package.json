@@ -19,6 +19,6 @@
     "@app-factory/shared": "workspace:*"
   },
   "devDependencies": {
-    "tsx": "^4.19.2"
+    "tsx": "^4.22.3"
   }
 }
