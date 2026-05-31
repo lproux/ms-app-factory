@@ -69,6 +69,27 @@ function kvName(scope: string, name: string): string {
   return `${scope}-${name}`.replace(/[^A-Za-z0-9-]/g, '-');
 }
 
+export interface BuildSecretStoreOptions {
+  keyVaultUrl?: string;
+  credential?: import('@azure/identity').TokenCredential;
+}
+
+export async function buildSecretStore(opts: BuildSecretStoreOptions = {}): Promise<SecretStore> {
+  if (opts.keyVaultUrl && opts.credential) {
+    try {
+      const { SecretClient } = await import('@azure/keyvault-secrets');
+      const client = new SecretClient(opts.keyVaultUrl, opts.credential);
+      return new SecretStore({ vault: azureKeyVaultAdapter(client) });
+    } catch (err) {
+      log.warn(
+        { err: (err as Error).message, keyVaultUrl: opts.keyVaultUrl },
+        'failed to build Key Vault adapter; falling back to local-only SecretStore',
+      );
+    }
+  }
+  return new SecretStore();
+}
+
 export function azureKeyVaultAdapter(client: KvClient): KeyVaultAdapter {
   return {
     async setSecret(name, value) {

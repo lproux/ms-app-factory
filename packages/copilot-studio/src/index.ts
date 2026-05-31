@@ -12,10 +12,11 @@ import {
   type SecretRef,
 } from '@app-factory/shared';
 import { execute, type Step } from '@app-factory/orchestrator';
-import { buildPasteBundle, SecretStore } from '@app-factory/secret-store';
+import { buildPasteBundle, buildSecretStore } from '@app-factory/secret-store';
 import { buildLogoSet } from '@app-factory/logo-pipeline';
 import { getCredential } from '@app-factory/auth-broker';
 import {
+  autoImprove,
   JudgePanel,
   makeClaudeJudge,
   makeCopilotStudioJudge,
@@ -363,7 +364,7 @@ const steps: Step<CSCtx>[] = [
           makeCopilotStudioJudge({ persona }),
         ]);
         const panel = new JudgePanel({ judges, policy: { vetoOn: ['security'] } });
-        const artifact: JudgeArtifact = {
+        const buildArtifact = (extraNotes: string[]): JudgeArtifact => ({
           kind: 'cs-agent',
           id: ctx.agentRecordId ?? ctx.agentDef?.uniqueName ?? ctx.fctx.runId,
           displayName: ctx.agentDef?.displayName ?? ctx.fctx.brand?.name ?? 'cs-agent',
@@ -375,18 +376,30 @@ const steps: Step<CSCtx>[] = [
             `Topics: ${ctx.agentDef?.topics.length ?? 0}`,
             `Invoke URL: ${ctx.invokeUrl ?? '<not published>'}`,
             `Warnings so far: ${ctx.warnings.length}`,
+            ...(extraNotes.length > 0 ? [`RepairNotes: ${extraNotes.join(' | ')}`] : []),
           ].join('\n'),
           payload: {
             agentDef: ctx.agentDef,
             artifacts: ctx.artifacts,
             warnings: ctx.warnings,
+            repairNotes: extraNotes,
           },
-        };
+        });
         try {
-          ctx.panel = await panel.review(artifact);
+          const converged = await autoImprove({
+            panel,
+            initial: { input: ctx, artifact: buildArtifact([]) },
+            maxRounds: 3,
+            regenerate: async (input, repairNotes) => {
+              input.warnings.push(`A11 auto-improve repair notes: ${repairNotes.join(' | ')}`);
+              return { input, artifact: buildArtifact(repairNotes) };
+            },
+          });
+          ctx.panel = await panel.review(converged.artifact);
+          log.info({ rounds: converged.rounds }, 'A11 auto-improve converged');
         } catch (err) {
           if (err instanceof JudgeVetoError) {
-            ctx.warnings.push(`A11 judge veto: ${err.message}`);
+            ctx.warnings.push(`A11 judge veto after auto-improve: ${err.message}`);
             ctx.panel = {
               vetoed: true,
               approvals: 0,
@@ -462,7 +475,13 @@ export async function runCopilotStudio(fctx: FactoryContext): Promise<RunResult>
     log_.error({ err }, 'WBS execution halted');
   }
 
-  const store = new SecretStore();
+  const vaultCred = fctx.emit.keyVault
+    ? getCredential({ mode: fctx.auth.mode, tenantId: fctx.tenant?.tenantId })
+    : undefined;
+  const store = await buildSecretStore({
+    keyVaultUrl: fctx.emit.keyVault,
+    credential: vaultCred,
+  });
   for (const s of ctx.secrets) {
     await store.set(s.ref.scope, s.ref.name, s.value);
   }
