@@ -22,7 +22,7 @@
     "@app-factory/shared": "workspace:*",
     "@app-factory/teams-app": "workspace:*",
     "@inquirer/prompts": "^7.10.1",
-    "commander": "^12.1.0",
+    "commander": "^15.0.0",
     "execa": "^9.5.2",
     "nanoid": "^5.0.9",
     "yaml": "^2.7.0"
