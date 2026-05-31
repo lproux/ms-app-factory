@@ -2,6 +2,7 @@ import { execa, type Options as ExecaOptions } from 'execa';
 import { AppFactoryError } from '@app-factory/shared';
 import {
   makeCliWrapper,
+  spawn as orchestratorSpawn,
   type SpawnOptions,
   type WorkerHandle,
 } from '@app-factory/orchestrator';
@@ -28,6 +29,9 @@ const agent365Runner = makeCliWrapper({
   minVersion: MIN_AGENT365_VERSION,
   installHint: INSTALL_HINT,
   portalUrl: AGENT365_PORTAL_URL,
+  // Use the package-surface spawn so vi.mock('@app-factory/orchestrator')
+  // intercepts the call from integration tests.
+  spawnFn: orchestratorSpawn,
 });
 
 // ---------------------------------------------------------------------------

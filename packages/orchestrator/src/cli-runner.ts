@@ -60,6 +60,13 @@ export interface MakeCliWrapperOptions {
   portalUrl?: string;
   /** Override the `[<marker>:N]` echo marker; defaults to `${bin}-done`. */
   marker?: string;
+  /**
+   * Spawn function used by `runInTmux`. Defaults to the internal `spawn` from
+   * `./tmux.js`, but consumers can pass the package-surface spawn (imported
+   * from `@app-factory/orchestrator`) so that test layers mocking the package
+   * boundary intercept the call. Per-call `spawnFn` overrides this.
+   */
+  spawnFn?: SpawnLike;
 }
 
 export interface DetectVersionOptions {
@@ -184,7 +191,7 @@ export function makeCliWrapper(options: MakeCliWrapperOptions): CliWrapper {
   }
 
   async function runInTmux(opts: CliRunInTmuxOptions): Promise<string> {
-    const spawnFn = opts.spawnFn ?? spawn;
+    const spawnFn = opts.spawnFn ?? options.spawnFn ?? spawn;
     const failureRegex = opts.failureRegex ?? /(error|failed|✖|✗)\b/i;
     const successRegex = opts.successRegex ?? /./;
     const timeoutMs = opts.timeoutMs ?? 20 * 60_000;

@@ -2,6 +2,7 @@ import { execa, type Options as ExecaOptions } from 'execa';
 import { AppFactoryError } from '@app-factory/shared';
 import {
   makeCliWrapper,
+  spawn as orchestratorSpawn,
   type SpawnOptions,
   type WorkerHandle,
 } from '@app-factory/orchestrator';
@@ -22,6 +23,9 @@ const atkRunner = makeCliWrapper({
   minVersion: MIN_ATK_VERSION,
   installHint: INSTALL_HINT,
   portalUrl: ATK_PORTAL_URL,
+  // Route spawn through the package surface so vi.mock('@app-factory/orchestrator')
+  // in integration tests intercepts the call.
+  spawnFn: orchestratorSpawn,
 });
 
 // ---------------------------------------------------------------------------
