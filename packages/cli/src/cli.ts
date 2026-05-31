@@ -18,6 +18,11 @@ program
   .option('--workdir <path>', 'Working directory for run artifacts')
   .option('--answer <kv...>', 'Pre-supplied answers as key=value pairs (repeatable)')
   .option('--non-interactive', 'Fail if a required answer is missing (CI mode)')
+  .option('--json', 'Emit the run report as JSON only (no human summary or paste bundle)')
+  .option(
+    '--reveal-secrets',
+    'Embed raw secret material into the paste bundle. Default is redacted placeholders so the bundle is safe to log/share. Real secrets always live in the OS keyring + optional Key Vault.',
+  )
   .action(async (opts) => {
     const answers: Record<string, string> = {};
     for (const kv of (opts.answer ?? []) as string[]) {
@@ -36,18 +41,38 @@ program
         workdir: opts.workdir,
         nonInteractive: opts.nonInteractive,
         answers,
+        revealSecrets: opts.revealSecrets,
       });
-      console.log(JSON.stringify(
-        { runId: result.runId, ok: result.ok, warnings: result.warnings, errors: result.errors, log: result.log },
-        null, 2,
-      ));
-      if (result.pasteBundle) {
-        console.log('\n--- paste bundle ---\n');
-        console.log(result.pasteBundle);
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        // Human-readable summary first, then the paste bundle.
+        const status = result.ok ? 'OK' : 'FAILED';
+        console.log(`Run ${result.runId} ${status}`);
+        console.log(`  artifacts: ${result.artifacts.length}`);
+        console.log(`  secrets:   ${result.secrets.length}${opts.revealSecrets ? '' : '  (values redacted; pass --reveal-secrets to embed)'}`);
+        console.log(`  warnings:  ${result.warnings.length}`);
+        if (result.warnings.length > 0) {
+          for (const w of result.warnings) console.log(`    - ${w}`);
+        }
+        if (result.errors.length > 0) {
+          console.log(`  errors:    ${result.errors.length}`);
+          for (const e of result.errors) console.log(`    - ${e}`);
+        }
+        if (result.log) console.log(`  log:       ${result.log}`);
+        if (result.pasteBundle) {
+          console.log('\n--- paste bundle ---\n');
+          console.log(result.pasteBundle);
+        }
       }
       process.exit(result.ok ? 0 : 1);
     } catch (err) {
-      console.error((err as Error).stack ?? String(err));
+      const e = err as Error & { code?: string; details?: unknown; portalUrl?: string };
+      if (e.portalUrl) {
+        console.error(`\x1b[31m→ Open portal: ${e.portalUrl}\x1b[0m`);
+      }
+      if (e.code) console.error(`[${e.code}] ${e.message}`);
+      else console.error(e.stack ?? String(err));
       process.exit(1);
     }
   });

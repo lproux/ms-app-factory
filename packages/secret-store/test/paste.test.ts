@@ -2,13 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { buildPasteBundle } from '../src/paste.js';
 
 describe('buildPasteBundle', () => {
-  it('emits sections, .env block, and clawpilot block for items', () => {
+  it('redacts secret values by default (no leak into stdout)', () => {
+    const md = buildPasteBundle([
+      { scope: 'teams-app', name: 'entra-client-secret', value: 'abc123', description: 'Entra app secret' },
+    ]);
+    expect(md).toContain('## Secrets');
+    expect(md).toContain('### teams-app / entra-client-secret');
+    expect(md).toContain('Values redacted');
+    expect(md).not.toContain('abc123');
+    expect(md).toContain('<retrieve via SecretStore.get(scope, name)>');
+  });
+
+  it('embeds raw values + .env block + clawpilot block when revealSecrets: true', () => {
     const md = buildPasteBundle(
       [
         { scope: 'teams-app', name: 'entra-client-secret', value: 'abc123', description: 'Entra app secret' },
         { scope: 'copilot-studio', name: 'pac-auth', value: 'profile=af-dev', description: 'pac auth name' },
       ],
       {
+        revealSecrets: true,
         artifacts: [
           { kind: 'entra-app', id: 'app-1', displayName: 'helpdesk' },
           { kind: 'bot', id: 'bot-1' },
@@ -35,8 +47,11 @@ describe('buildPasteBundle', () => {
     expect(md).toContain('| rg-helpdesk | switch to Spot VMs | 12.34 | Azure Advisor |');
   });
 
-  it('quotes values containing whitespace or special characters', () => {
-    const md = buildPasteBundle([{ scope: 's', name: 'n', value: 'hello world & "tricky"' }]);
+  it('quotes values containing whitespace or special characters when revealing', () => {
+    const md = buildPasteBundle(
+      [{ scope: 's', name: 'n', value: 'hello world & "tricky"' }],
+      { revealSecrets: true },
+    );
     expect(md).toContain('S__N="hello world & \\"tricky\\""');
     expect(md).toContain("export S__N='hello world & \"tricky\"'");
   });
@@ -49,10 +64,11 @@ describe('buildPasteBundle', () => {
     expect(md).toContain('## Secrets');
   });
 
-  it('respects custom envPrefix and title', () => {
+  it('respects custom envPrefix and title (revealing)', () => {
     const md = buildPasteBundle([{ scope: 's', name: 'n', value: 'v' }], {
       title: '# Custom',
       envPrefix: 'AF_',
+      revealSecrets: true,
     });
     expect(md.startsWith('# Custom')).toBe(true);
     expect(md).toContain('AF_S__N=v');

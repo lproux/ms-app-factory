@@ -16,7 +16,6 @@ export interface RunOptions {
 }
 
 export async function execute<C>(steps: Step<C>[], ctx: C, opts: RunOptions = {}): Promise<void> {
-  const byId = new Map(steps.map((s) => [s.id, s]));
   const done = new Set<string>();
   if (opts.planOnly) {
     for (const s of steps) {
@@ -33,16 +32,14 @@ export async function execute<C>(steps: Step<C>[], ctx: C, opts: RunOptions = {}
       const missing = steps.filter((s) => !done.has(s.id)).map((s) => s.id);
       throw new AppFactoryError('WBS_DEADLOCK', `cannot resolve dependencies for: ${missing.join(', ')}`);
     }
-    const groups = new Map<string, Step<C>[]>();
-    for (const s of ready) {
-      const g = s.parallelGroup ?? s.id;
-      const arr = groups.get(g) ?? [];
-      arr.push(s);
-      groups.set(g, arr);
-    }
-    const nextGroup = groups.values().next().value as Step<C>[];
+
+    // Fan out ALL ready steps in parallel. Steps that share a `parallelGroup`
+    // value behave the same as steps with distinct ids — Promise.all over the
+    // flat list runs them concurrently while still honouring `dependsOn`.
+    // Previously only the first group ran per round, which serialized any
+    // recipe that hadn't manually unified its parallelGroup keys.
     await Promise.all(
-      nextGroup.map((s) =>
+      ready.map((s) =>
         span(`step:${s.id}`, async () => {
           opts.onStep?.(s.id, 'start');
           try {
@@ -56,8 +53,5 @@ export async function execute<C>(steps: Step<C>[], ctx: C, opts: RunOptions = {}
         }),
       ),
     );
-    if (!byId.has(nextGroup[0]!.id)) {
-      throw new AppFactoryError('WBS_INTERNAL', 'unreachable');
-    }
   }
 }

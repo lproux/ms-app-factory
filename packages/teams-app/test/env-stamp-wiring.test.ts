@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stampEnvFile } from '@app-factory/azure-ops';
 
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(process.cwd(), '.teams-env-wiring-'));
+  // Use the WSL-native /tmp (fast) instead of /mnt/c (OneDrive-synced, ~30x slower).
+  dir = await mkdtemp(join(tmpdir(), 'af-teams-env-wiring-'));
 });
 
 afterEach(async () => {

@@ -496,6 +496,7 @@ export async function runCopilotStudio(fctx: FactoryContext): Promise<RunResult>
       title: '# App Factory — Copilot Studio run report',
       artifacts: ctx.artifacts,
       warnings: ctx.warnings,
+      revealSecrets: fctx.emit.revealSecrets === true,
     },
   );
 

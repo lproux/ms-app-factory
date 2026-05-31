@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
 import {
+  AppFactoryError,
   FactoryContext,
   createLogger,
   type RunResult,
@@ -26,18 +27,43 @@ export interface RunArgs {
   workdir?: string;
   answers?: Answers;
   nonInteractive?: boolean;
+  revealSecrets?: boolean;
 }
 
-async function defaultAsk(q: Question, _answers: Answers): Promise<unknown> {
+async function ciAsk(q: Question, _answers: Answers): Promise<unknown> {
   if (q.default !== undefined) return q.default;
-  throw new Error(
-    `required answer missing for "${q.id}" (${q.prompt}). Pass via --answers or run interactively.`,
+  throw new AppFactoryError(
+    'CLI_ANSWER_MISSING',
+    `required answer missing for "${q.id}" (${q.prompt}). Pass --answer ${q.id}=<value> or drop --non-interactive to be prompted.`,
+    { recoverable: true, details: { questionId: q.id, kind: q.kind } },
   );
+}
+
+async function interactiveAsk(q: Question, _answers: Answers): Promise<unknown> {
+  const prompts = (await import('@inquirer/prompts')) as typeof import('@inquirer/prompts');
+  const message = q.prompt;
+  switch (q.kind) {
+    case 'boolean':
+      return prompts.confirm({ message, default: q.default === true });
+    case 'choice':
+      return prompts.select({
+        message,
+        choices: (q.options ?? []).map((o) => ({ name: o.label, value: o.value })),
+        default: q.default as string | undefined,
+      });
+    case 'multi-choice':
+      return prompts.checkbox({
+        message,
+        choices: (q.options ?? []).map((o) => ({ name: o.label, value: o.value })),
+      });
+    default:
+      return prompts.input({ message, default: q.default as string | undefined });
+  }
 }
 
 export async function run(args: RunArgs): Promise<RunResult> {
   const recipe = await loadRecipe(args);
-  const ask = args.nonInteractive ? defaultAsk : defaultAsk;
+  const ask = args.nonInteractive ? ciAsk : interactiveAsk;
   const answers = await elicit({ recipe, initialAnswers: args.answers ?? {}, ask });
 
   const runId = nanoid(10);
@@ -104,11 +130,16 @@ export async function run(args: RunArgs): Promise<RunResult> {
       region: stringOrUndef(answers['region']),
       powerPlatformEnvironment: stringOrUndef(answers['environment']),
     },
+    emit: { keyring: true, revealSecrets: args.revealSecrets === true },
   });
 
   if (recipe.target === 'copilot-studio') return runCopilotStudio(fctx);
   if (recipe.target === 'teams') return runTeamsApp(fctx);
-  throw new Error(`unknown recipe target: ${recipe.target}`);
+  throw new AppFactoryError(
+    'CLI_RECIPE_TARGET_UNKNOWN',
+    `unknown recipe target: ${recipe.target}`,
+    { details: { recipeId: recipe.id, target: recipe.target } },
+  );
 }
 
 async function loadRecipe(args: RunArgs): Promise<Recipe> {
@@ -118,7 +149,13 @@ async function loadRecipe(args: RunArgs): Promise<Recipe> {
     return yaml.parse(txt) as Recipe;
   }
   const r = getRecipe(args.recipe);
-  if (!r) throw new Error(`unknown recipe: ${args.recipe}`);
+  if (!r) {
+    throw new AppFactoryError(
+      'CLI_RECIPE_UNKNOWN',
+      `unknown recipe: ${args.recipe}. Run \`app-factory list-recipes\` to see what is available.`,
+      { recoverable: true, details: { recipe: args.recipe } },
+    );
+  }
   return r;
 }
 
@@ -143,14 +180,34 @@ function renderStepList(title: string, steps: readonly RenderableStep[]): string
   return lines.join('\n');
 }
 
-function parseKbSources(v: unknown): { kind: 'local' | 'sharepoint' | 'url' | 'github' | 'aws-s3' | 'gcp-gcs' | 'foundry' | 'm365-admin'; uri: string }[] {
+const KB_KINDS = [
+  'local',
+  'sharepoint',
+  'url',
+  'github',
+  'aws-s3',
+  'gcp-gcs',
+  'foundry',
+  'm365-admin',
+] as const;
+type KbKind = (typeof KB_KINDS)[number];
+
+function parseKbSources(v: unknown): { kind: KbKind; uri: string }[] {
   if (typeof v !== 'string') return [];
   return v
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .map((entry) => {
-      const [kind, ...rest] = entry.split(':');
-      return { kind: (kind as 'local') ?? 'local', uri: rest.join(':') };
+      const [rawKind, ...rest] = entry.split(':');
+      const kind = rawKind as KbKind | undefined;
+      if (!kind || !(KB_KINDS as readonly string[]).includes(kind)) {
+        throw new AppFactoryError(
+          'CLI_KB_KIND_INVALID',
+          `unknown KB source kind: ${rawKind}. Valid kinds: ${KB_KINDS.join(', ')}.`,
+          { recoverable: true, details: { entry } },
+        );
+      }
+      return { kind, uri: rest.join(':') };
     });
 }

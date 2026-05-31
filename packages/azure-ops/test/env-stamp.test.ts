@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stampEnvFile } from '../src/env-stamp.js';
 
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(process.cwd(), '.env-stamp-test-'));
+  // Use the WSL-native /tmp (fast) instead of /mnt/c (OneDrive-synced, ~30x slower).
+  dir = await mkdtemp(join(tmpdir(), 'af-env-stamp-'));
 });
 
 afterEach(async () => {

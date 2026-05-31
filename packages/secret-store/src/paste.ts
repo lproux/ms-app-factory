@@ -21,7 +21,17 @@ export interface PasteBundleOptions {
   warnings?: string[];
   costSuggestions?: CostSuggestion[];
   envPrefix?: string;
+  /**
+   * When true, embed raw secret values into the paste bundle. Default is
+   * **false** — the bundle ships placeholder text (`<retrieve via SecretStore>`)
+   * and the operator must opt in explicitly. This prevents tmux capture-pane,
+   * CI logs, and terminal scrollback from harvesting the values that were
+   * persisted to keytar / Key Vault.
+   */
+  revealSecrets?: boolean;
 }
+
+const SECRET_PLACEHOLDER = '<retrieve via SecretStore.get(scope, name)>';
 
 export function buildPasteBundle(items: PasteItem[], opts: PasteBundleOptions = {}): string {
   const title = opts.title ?? '# App Factory — run report';
@@ -42,12 +52,21 @@ export function buildPasteBundle(items: PasteItem[], opts: PasteBundleOptions = 
   }
 
   if (items.length > 0) {
+    const reveal = opts.revealSecrets === true;
+    const renderValue = (it: PasteItem) => (reveal ? it.value : SECRET_PLACEHOLDER);
+
     sections.push('## Secrets', '');
+    if (!reveal) {
+      sections.push(
+        '> Values redacted. Pass `--reveal-secrets` (or set `revealSecrets: true`) to render the actual secret material into this bundle. Until then, retrieve each entry via the SecretStore API or your Key Vault.',
+      );
+      sections.push('');
+    }
     for (const it of items) {
       sections.push(`### ${it.scope} / ${it.name}`);
       if (it.description) sections.push(it.description);
       sections.push('```');
-      sections.push(it.value);
+      sections.push(renderValue(it));
       sections.push('```');
       sections.push('');
     }
@@ -55,7 +74,8 @@ export function buildPasteBundle(items: PasteItem[], opts: PasteBundleOptions = 
     sections.push('## `.env` block', '');
     sections.push('```dotenv');
     for (const it of items) {
-      sections.push(`${envKey(it.scope, it.name, opts.envPrefix)}=${envValue(it.value)}`);
+      const raw = renderValue(it);
+      sections.push(`${envKey(it.scope, it.name, opts.envPrefix)}=${reveal ? envValue(raw) : raw}`);
     }
     sections.push('```');
     sections.push('');
@@ -68,7 +88,8 @@ export function buildPasteBundle(items: PasteItem[], opts: PasteBundleOptions = 
     sections.push('```sh');
     sections.push('# App Factory — clawpilot paste bundle');
     for (const it of items) {
-      sections.push(`export ${envKey(it.scope, it.name, opts.envPrefix)}=${shellQuote(it.value)}`);
+      const raw = renderValue(it);
+      sections.push(`export ${envKey(it.scope, it.name, opts.envPrefix)}=${reveal ? shellQuote(raw) : shellQuote(raw)}`);
     }
     if (opts.artifacts) {
       for (const a of opts.artifacts) {

@@ -67,8 +67,9 @@ export const FactoryContext = z.object({
       keyring: z.boolean().default(true),
       keyVault: z.string().optional(),
       pasteBundlePath: z.string().optional(),
+      revealSecrets: z.boolean().default(false),
     })
-    .default({ keyring: true }),
+    .default({ keyring: true, revealSecrets: false }),
 });
 export type FactoryContext = z.infer<typeof FactoryContext>;
 

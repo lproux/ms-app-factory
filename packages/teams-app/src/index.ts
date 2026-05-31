@@ -682,6 +682,7 @@ export async function runTeamsApp(fctx: FactoryContext): Promise<RunResult> {
       title: '# App Factory — Teams app run report',
       artifacts: ctx.artifacts,
       warnings: ctx.warnings,
+      revealSecrets: ctx.fctx.emit.revealSecrets === true,
       ...(ctx.costSuggestions && ctx.costSuggestions.length > 0
         ? { costSuggestions: ctx.costSuggestions }
         : {}),
