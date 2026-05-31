@@ -1,0 +1,140 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  ci-gate:
+    name: ci-gate (node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Lint
+        run: pnpm lint
+
+  release:
+    name: build + publish release
+    needs: ci-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI (with workspace deps)
+        run: pnpm --filter @app-factory/cli... build
+
+      - name: Build skill adapters
+        run: |
+          pnpm --filter @app-factory/skill-claude build
+          pnpm --filter @app-factory/skill-copilot-cli build
+
+      - name: Stage release payload
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          STAGE="release/stage/app-factory-${TAG}"
+          mkdir -p "${STAGE}/cli" "${STAGE}/skill-adapter" "${STAGE}/gh-extension"
+
+          # CLI tarball (npm pack of @app-factory/cli — includes dist + package.json).
+          (cd packages/cli && pnpm pack --pack-destination "${GITHUB_WORKSPACE}/${STAGE}/cli")
+
+          # Skill-adapter SKILL.md — generate via the claude installer into a temp HOME.
+          mkdir -p "${STAGE}/.fake-home"
+          HOME="${GITHUB_WORKSPACE}/${STAGE}/.fake-home" \
+            node packages/skill-adapters/claude/dist/install.js
+          cp "${STAGE}/.fake-home/.claude/skills/app-factory/SKILL.md" \
+             "${STAGE}/skill-adapter/SKILL.md"
+
+          # gh-app-factory script — generate via the copilot-cli installer.
+          HOME="${GITHUB_WORKSPACE}/${STAGE}/.fake-home" \
+            node packages/skill-adapters/copilot-cli/dist/install.js
+          cp "${STAGE}/.fake-home/.local/share/gh/extensions/gh-app-factory/gh-app-factory" \
+             "${STAGE}/gh-extension/gh-app-factory"
+          cp "${STAGE}/.fake-home/.local/share/gh/extensions/gh-app-factory/extension.yml" \
+             "${STAGE}/gh-extension/extension.yml"
+
+          rm -rf "${STAGE}/.fake-home"
+
+          mkdir -p release
+          tar -czf "release/app-factory-${TAG}.tar.gz" -C "release/stage" "app-factory-${TAG}"
+          ls -lh "release/app-factory-${TAG}.tar.gz"
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          {
+            echo "## Changes"
+            echo
+            if [ -n "${PREV_TAG}" ]; then
+              echo "Commits since ${PREV_TAG}:"
+              echo
+              git log --pretty=format:'- %s (%h)' "${PREV_TAG}..${TAG}"
+            else
+              echo "Initial release. All commits:"
+              echo
+              git log --pretty=format:'- %s (%h)' "${TAG}"
+            fi
+            echo
+            echo
+            echo "## Artifact"
+            echo
+            echo "- \`app-factory-${TAG}.tar.gz\` — bundles the @app-factory/cli tarball, the Claude SKILL.md, and the \`gh-app-factory\` extension script."
+          } > release/notes.md
+          echo "notes_path=release/notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "${TAG}" \
+            "release/app-factory-${TAG}.tar.gz" \
+            --title "${TAG}" \
+            --notes-file "${{ steps.changelog.outputs.notes_path }}"
