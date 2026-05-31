@@ -4,6 +4,12 @@ const RESPONSE_CONTRACT = `Respond with STRICT JSON only, matching this schema e
 {"approved": boolean, "score": number (0..1), "reason": string, "repairNotes": string}
 Do not wrap the JSON in markdown fences. Do not add any commentary before or after.`;
 
+const COMBINED_RESPONSE_CONTRACT = `Respond with STRICT JSON only, matching this schema exactly and nothing else:
+{"verdicts": {"architect": {...}, "security": {...}, "cost": {...}, "ux": {...}}}
+Each inner object must follow:
+{"approved": boolean, "score": number (0..1), "reason": string, "repairNotes": string}
+Only include the personas listed in this prompt. Do not wrap the JSON in markdown fences.`;
+
 const PERSONA_BRIEFS: Record<Persona, string> = {
   architect:
     'You are the ARCHITECT judge. Evaluate technical coherence, sound design, dependency hygiene, ' +
@@ -52,6 +58,78 @@ export function parseVerdict(
   persona: Persona,
 ): Omit<Verdict, 'judge' | 'persona'> & { judge: string; persona: Persona } {
   const json = extractJson(raw);
+  return verdictFromJson(json, judgeId, persona);
+}
+
+/**
+ * Build a single prompt that asks one judge to score the artifact from the
+ * point of view of EVERY supplied persona, in one round-trip. Used by the
+ * `compact` judge-panel shape to cut LLM calls from 12 to 3.
+ */
+export function buildCombinedPrompt(personas: Persona[], artifact: JudgeArtifact): string {
+  if (personas.length === 0) {
+    throw new Error('buildCombinedPrompt requires at least one persona');
+  }
+  const briefs = personas
+    .map((p) => `### ${p.toUpperCase()} brief\n${PERSONA_BRIEFS[p]}`)
+    .join('\n\n');
+  const payloadBlock =
+    artifact.payload && Object.keys(artifact.payload).length > 0
+      ? `\n\nRaw payload (JSON):\n${safeStringify(artifact.payload)}`
+      : '';
+  const displayLine = artifact.displayName ? `\nDisplay name: ${artifact.displayName}` : '';
+  return [
+    'You are a COMBINED multi-persona judge. Score the artifact below from each of the following personas independently:',
+    personas.map((p) => `- ${p}`).join('\n'),
+    '',
+    briefs,
+    '',
+    `Artifact under review:`,
+    `- kind: ${artifact.kind}`,
+    `- id: ${artifact.id}${displayLine}`,
+    '',
+    `Summary the team wrote about this artifact:`,
+    artifact.summary,
+    payloadBlock,
+    '',
+    COMBINED_RESPONSE_CONTRACT,
+  ].join('\n');
+}
+
+/**
+ * Parse a combined-judge response that contains a `verdicts` map keyed by
+ * persona. Returns one Verdict per persona requested. Missing personas
+ * become recoverable rejections with `reason: 'no verdict in combined response'`.
+ */
+export function parseCombinedVerdicts(
+  raw: string,
+  judgeId: string,
+  personas: Persona[],
+): Verdict[] {
+  const json = extractJson(raw);
+  const inner =
+    json && typeof json === 'object' && 'verdicts' in json && typeof json.verdicts === 'object'
+      ? (json.verdicts as Record<string, unknown>)
+      : (json as Record<string, unknown>);
+  return personas.map((persona) => {
+    const slot = inner?.[persona];
+    if (slot && typeof slot === 'object') {
+      return verdictFromJson(slot as Record<string, unknown>, judgeId, persona);
+    }
+    return {
+      judge: judgeId,
+      persona,
+      approved: false,
+      reason: 'no verdict in combined response',
+    };
+  });
+}
+
+function verdictFromJson(
+  json: Record<string, unknown>,
+  judgeId: string,
+  persona: Persona,
+): Verdict {
   const approved = typeof json.approved === 'boolean' ? json.approved : false;
   const score =
     typeof json.score === 'number' && Number.isFinite(json.score)

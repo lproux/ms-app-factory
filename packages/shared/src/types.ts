@@ -33,6 +33,19 @@ export type KbSource = z.infer<typeof KbSource>;
 export const AuthMode = z.enum(['interactive', 'sp', 'chained']);
 export type AuthMode = z.infer<typeof AuthMode>;
 
+/**
+ * Configurable judge-panel fan-out shape. See `docs/judge-panel-shapes.md`
+ * for the cost/coverage trade-offs and how to pick a shape per recipe.
+ *
+ * - `compact`     — one judge per model, each prompted with ALL personas in a
+ *                   single round-trip. 3 LLM calls per panel review.
+ * - `cross-model` — current default: every persona × every model. 12 calls.
+ * - `full`        — every persona × every registered judge factory; reserved
+ *                   for security-sensitive or extensible deployments.
+ */
+export const JudgePanelShape = z.enum(['compact', 'cross-model', 'full']);
+export type JudgePanelShape = z.infer<typeof JudgePanelShape>;
+
 export const FactoryContext = z.object({
   runId: z.string(),
   recipe: RecipeKind,
@@ -70,6 +83,12 @@ export const FactoryContext = z.object({
       revealSecrets: z.boolean().default(false),
     })
     .default({ keyring: true, revealSecrets: false }),
+  judge: z
+    .object({
+      shape: JudgePanelShape.default('cross-model'),
+      maxRounds: z.number().int().min(1).max(10).default(3),
+    })
+    .default({ shape: 'cross-model', maxRounds: 3 }),
 });
 export type FactoryContext = z.infer<typeof FactoryContext>;
 

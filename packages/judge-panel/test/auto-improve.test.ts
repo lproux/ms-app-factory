@@ -256,4 +256,44 @@ describe('judge-panel veto + autoImprove loop (kb-grounding regression)', () => 
     // maxRounds=1 means the first failing review aborts BEFORE regenerate runs.
     expect(regenCalls).toBe(0);
   });
+
+  it('maxRounds=1 short-circuits after exactly one panel.review call', async () => {
+    // Mirrors the FactoryContext.judge.maxRounds=1 fast-path: routine runs
+    // should bail out immediately on veto instead of paying for 3 rounds.
+    let panelReviewCalls = 0;
+    const countingJudge: Judge = {
+      id: 'claude:security',
+      persona: 'security',
+      async review(): Promise<Verdict> {
+        panelReviewCalls += 1;
+        return {
+          judge: 'claude:security',
+          persona: 'security',
+          approved: false,
+          reason: 'fast-fail',
+          repairNotes: 'remove secret',
+        };
+      },
+    };
+    const panel = new JudgePanel({ judges: [countingJudge] });
+
+    let regenCalls = 0;
+    await expect(
+      autoImprove<number>({
+        panel,
+        maxRounds: 1,
+        initial: { input: 0, artifact: { kind: 'wbs-step', id: 'short', summary: 'short-circuit' } },
+        async regenerate(input) {
+          regenCalls += 1;
+          return {
+            input: input + 1,
+            artifact: { kind: 'wbs-step', id: 'short', summary: 'should not reach' },
+          };
+        },
+      }),
+    ).rejects.toBeInstanceOf(JudgeVetoError);
+
+    expect(panelReviewCalls).toBe(1);
+    expect(regenCalls).toBe(0);
+  });
 });

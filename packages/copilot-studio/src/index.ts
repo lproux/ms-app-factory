@@ -17,10 +17,7 @@ import { buildLogoSet } from '@app-factory/logo-pipeline';
 import { getCredential } from '@app-factory/auth-broker';
 import {
   autoImprove,
-  JudgePanel,
-  makeClaudeJudge,
-  makeCopilotStudioJudge,
-  makeGhCopilotJudge,
+  buildJudgePanel,
   type JudgeArtifact,
   type PanelResult,
   type Persona,
@@ -358,12 +355,11 @@ const steps: Step<CSCtx>[] = [
     run: async (ctx) =>
       span('A11', async () => {
         const personas: Persona[] = ['architect', 'security', 'cost', 'ux'];
-        const judges = personas.flatMap((persona) => [
-          makeClaudeJudge({ persona }),
-          makeGhCopilotJudge({ persona }),
-          makeCopilotStudioJudge({ persona }),
-        ]);
-        const panel = new JudgePanel({ judges, policy: { vetoOn: ['security'] } });
+        const panel = buildJudgePanel({
+          shape: ctx.fctx.judge.shape,
+          personas,
+          policy: { vetoOn: ['security'] },
+        });
         const buildArtifact = (extraNotes: string[]): JudgeArtifact => ({
           kind: 'cs-agent',
           id: ctx.agentRecordId ?? ctx.agentDef?.uniqueName ?? ctx.fctx.runId,
@@ -389,7 +385,7 @@ const steps: Step<CSCtx>[] = [
           const converged = await autoImprove({
             panel,
             initial: { input: ctx, artifact: buildArtifact([]) },
-            maxRounds: 3,
+            maxRounds: ctx.fctx.judge.maxRounds,
             regenerate: async (input, repairNotes) => {
               input.warnings.push(`A11 auto-improve repair notes: ${repairNotes.join(' | ')}`);
               return { input, artifact: buildArtifact(repairNotes) };

@@ -28,10 +28,7 @@ import {
 } from '@app-factory/azure-ops';
 import {
   autoImprove,
-  JudgePanel,
-  makeClaudeJudge,
-  makeCopilotStudioJudge,
-  makeGhCopilotJudge,
+  buildJudgePanel,
   type JudgeArtifact,
   type PanelResult,
   type Persona,
@@ -530,12 +527,11 @@ const steps: Step<TACtx>[] = [
     run: async (ctx) =>
       span('B13', async () => {
         const personas: Persona[] = ['architect', 'security', 'cost', 'ux'];
-        const judges = personas.flatMap((persona) => [
-          makeClaudeJudge({ persona }),
-          makeGhCopilotJudge({ persona }),
-          makeCopilotStudioJudge({ persona }),
-        ]);
-        const panel = new JudgePanel({ judges, policy: { vetoOn: ['security'] } });
+        const panel = buildJudgePanel({
+          shape: ctx.fctx.judge.shape,
+          personas,
+          policy: { vetoOn: ['security'] },
+        });
         const buildArtifact = (extraNotes: string[]): JudgeArtifact => ({
           kind: 'teams-app',
           id: ctx.bot?.botId ?? ctx.entra?.appId ?? ctx.fctx.runId,
@@ -561,7 +557,7 @@ const steps: Step<TACtx>[] = [
           const converged = await autoImprove({
             panel,
             initial: { input: ctx, artifact: buildArtifact([]) },
-            maxRounds: 3,
+            maxRounds: ctx.fctx.judge.maxRounds,
             regenerate: async (input, repairNotes) => {
               input.warnings.push(`B13 auto-improve repair notes: ${repairNotes.join(' | ')}`);
               return { input, artifact: buildArtifact(repairNotes) };
