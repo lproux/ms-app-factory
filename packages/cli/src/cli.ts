@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { AppFactoryError } from '@app-factory/shared';
+import { getRecipe, type Recipe } from '@app-factory/elicitation';
+import { promises as fs } from 'node:fs';
 import { run } from './run.js';
+import { printDoctorReport, runDoctor } from './doctor.js';
 
 const program = new Command();
 
@@ -20,6 +24,10 @@ program
   .option('--non-interactive', 'Fail if a required answer is missing (CI mode)')
   .option('--json', 'Emit the run report as JSON only (no human summary or paste bundle)')
   .option(
+    '--skip-doctor',
+    'Skip the preflight prerequisite checks. Default: doctor runs before elicitation.',
+  )
+  .option(
     '--reveal-secrets',
     'Embed raw secret material into the paste bundle. Default is redacted placeholders so the bundle is safe to log/share. Real secrets always live in the OS keyring + optional Key Vault.',
   )
@@ -34,6 +42,24 @@ program
       answers[kv.slice(0, ix)] = kv.slice(ix + 1);
     }
     try {
+      // Preflight: run doctor checks scoped to this recipe before elicitation,
+      // unless the user explicitly opts out. This prevents the "90s into a live
+      // run before discovering pac is missing" footgun the UX critic flagged.
+      if (!opts.skipDoctor) {
+        const recipe = await resolvePreflightRecipe(opts.recipe, opts.recipeFile);
+        const report = await runDoctor({ recipe });
+        if (!opts.json) printDoctorReport(report);
+        if (!report.ok) {
+          const failed = report.results
+            .filter((r) => r.required && r.status === 'fail')
+            .map((r) => r.name);
+          throw new AppFactoryError(
+            'DOCTOR_FAILED',
+            `preflight prerequisite check failed: ${failed.join(', ')}. Install the missing tools (see fix hints above) or re-run with --skip-doctor to bypass.`,
+            { recoverable: true, details: { failed, recipe: recipe?.id } },
+          );
+        }
+      }
       const result = await run({
         recipe: opts.recipe,
         recipeFile: opts.recipeFile,
@@ -86,5 +112,53 @@ program
       console.log(`${r.id}\t[${r.target}]\t${r.title}`);
     }
   });
+
+program
+  .command('doctor')
+  .description('Probe prerequisite tools (node/pnpm/tmux/pac/atk/agent365/gh/az + env vars).')
+  .option('-r, --recipe <id>', 'Scope checks to a specific recipe (otherwise probes the full matrix).')
+  .option('--recipe-file <path>', 'Scope checks to a recipe loaded from a YAML file.')
+  .option('--json', 'Emit the report as JSON instead of the pretty table.')
+  .action(async (opts) => {
+    try {
+      const recipe = await resolvePreflightRecipe(opts.recipe, opts.recipeFile);
+      const report = await runDoctor({ recipe });
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printDoctorReport(report);
+      }
+      process.exit(report.ok ? 0 : 1);
+    } catch (err) {
+      const e = err as Error & { code?: string };
+      if (e.code) console.error(`[${e.code}] ${e.message}`);
+      else console.error(e.stack ?? String(err));
+      process.exit(1);
+    }
+  });
+
+/**
+ * Resolve a recipe for preflight purposes (only `id` and `target` are needed by the doctor).
+ * Returns undefined if neither flag is set — that's fine for the standalone `doctor` command,
+ * which then probes the full matrix.
+ */
+async function resolvePreflightRecipe(
+  recipeId: string | undefined,
+  recipeFile: string | undefined,
+): Promise<Pick<Recipe, 'id' | 'target'> | undefined> {
+  if (recipeFile) {
+    const yaml = await import('yaml');
+    const txt = await fs.readFile(recipeFile, 'utf8');
+    const parsed = yaml.parse(txt) as Recipe;
+    return { id: parsed.id, target: parsed.target };
+  }
+  if (recipeId) {
+    const r = getRecipe(recipeId);
+    // If the id is unknown, we don't throw here — the subsequent `run()` will. We just
+    // fall back to a full-matrix probe so the user still sees useful preflight output.
+    if (r) return { id: r.id, target: r.target };
+  }
+  return undefined;
+}
 
 program.parseAsync(process.argv);

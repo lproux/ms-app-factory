@@ -12,6 +12,7 @@
     "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean --target node22 --no-splitting",
     "typecheck": "tsc --noEmit",
     "start": "node dist/cli.js",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
@@ -21,7 +22,11 @@
     "@app-factory/teams-app": "workspace:*",
     "@inquirer/prompts": "^7.10.1",
     "commander": "^12.1.0",
+    "execa": "^9.5.2",
     "nanoid": "^5.0.9",
     "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
   }
 }
