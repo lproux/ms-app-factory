@@ -59,7 +59,7 @@ export interface FinalizeRunResult {
  * Build the SecretStore, persist every queued secret, and render the
  * paste bundle. The SecretStore picks up an Azure Key Vault adapter
  * only when `fctx.emit.keyVault` is set — otherwise it falls back to
- * the local keytar / in-memory store (no credential is constructed in
+ * the local OS keyring (no credential is constructed in
  * that case so the auth-broker isn't probed unnecessarily).
  */
 export async function finalizeRun(args: FinalizeRunArgs): Promise<FinalizeRunResult> {

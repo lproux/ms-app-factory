@@ -42,25 +42,17 @@ vi.mock('@azure/keyvault-secrets', () => ({
   },
 }));
 
-// Match the integration-test pattern: stub keytar with a no-op so the
-// SecretStore never touches the host keyring. Tests don't depend on
-// keytar's actual side effects.
-vi.mock('keytar', () => ({
-  default: {
-    async setPassword() {},
-    async getPassword() {
+// Stub the OS keyring with a no-op so the SecretStore never touches the
+// host. `@napi-rs/keyring` replaced `keytar` (security/maint).
+vi.mock('@napi-rs/keyring', () => ({
+  Entry: class FakeEntry {
+    constructor(public service: string, public account: string) {}
+    setPassword(_value: string) {
+      /* no-op */
+    }
+    getPassword() {
       return null;
-    },
-    async deletePassword() {
-      return true;
-    },
-  },
-  async setPassword() {},
-  async getPassword() {
-    return null;
-  },
-  async deletePassword() {
-    return true;
+    }
   },
 }));
 

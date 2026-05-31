@@ -4,10 +4,8 @@ packages:
 allowBuilds:
   '@biomejs/biome': true
   esbuild: true
-  keytar: true
   sharp: true
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - esbuild
-  - keytar
   - sharp

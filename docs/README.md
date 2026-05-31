@@ -13,7 +13,7 @@ apps end-to-end. These docs are written to be read in order.
    and example invocations.
 4. [Auth and secrets](./auth-and-secrets.md) — hybrid interactive + service
    principal auth, `ChainedTokenCredential` resolution, secret storage
-   (keytar + Key Vault), unattended runs.
+   (OS keyring via `@napi-rs/keyring` + Key Vault), unattended runs.
 5. [Judge panel](./judge-panel.md) — three judges (Claude / GH Copilot /
    Copilot Studio), voting, tie-breakers, `autoImprove`.
 6. [Troubleshooting](./troubleshooting.md) — failure modes from

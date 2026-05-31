@@ -48,7 +48,7 @@ Index: [`docs/README.md`](docs/README.md).
 
 - `packages/shared` — types, logger, errors
 - `packages/auth-broker` — MSAL chained credentials (interactive + SP)
-- `packages/secret-store` — keytar + optional Azure Key Vault
+- `packages/secret-store` — `@napi-rs/keyring` (OS keyring) + optional Azure Key Vault
 - `packages/orchestrator` — tmux-based worker session pool + WBS runner
 - `packages/elicitation` — interview engine + recipes
 - `packages/copilot-studio` — WBS A executor

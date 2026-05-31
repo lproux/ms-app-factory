@@ -53,7 +53,7 @@ Copilot CLI.
 - Scope: Copilot Studio AND Teams in parallel — both ship together.
 - Auth: hybrid — InteractiveBrowser/DeviceCode for admin consent + PIM,
   ClientSecret SP for resource ops. Use ChainedTokenCredential.
-- Secrets: keytar primary, optional Azure Key Vault adapter.
+- Secrets: OS keyring via `@napi-rs/keyring` primary, optional Azure Key Vault adapter.
 - Orchestrator: tmux session named `app-factory`; every long-running CLI
   invocation goes through @app-factory/orchestrator spawn().
 - KB sources accepted: local, sharepoint, url, github, aws-s3, gcp-gcs,
@@ -69,7 +69,7 @@ Copilot CLI.
 Files exist at the paths below. Read them; do not regenerate.
 - packages/shared              types/log/errors/telemetry
 - packages/auth-broker         getCredential() + adminConsentUrl()
-- packages/secret-store        keytar + KV adapter + buildPasteBundle()
+- packages/secret-store        @napi-rs/keyring + KV adapter + buildPasteBundle()
 - packages/orchestrator        tmux session pool + WBS executor
 - packages/elicitation         engine + schema + two recipes
 - packages/copilot-studio      WBS A skeleton (placeholders A2–A12)

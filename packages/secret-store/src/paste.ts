@@ -26,7 +26,7 @@ export interface PasteBundleOptions {
    * **false** — the bundle ships placeholder text (`<retrieve via SecretStore>`)
    * and the operator must opt in explicitly. This prevents tmux capture-pane,
    * CI logs, and terminal scrollback from harvesting the values that were
-   * persisted to keytar / Key Vault.
+   * persisted to the OS keyring / Key Vault.
    */
   revealSecrets?: boolean;
 }

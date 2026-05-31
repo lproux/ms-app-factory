@@ -70,8 +70,10 @@ runtime concern; the CLI wires them together per recipe target.
                   +-------------------------------+
                   | @app-factory/secret-store     |
                   |  SecretStore.set/get          |
-                  |   - keytar (OS keyring)       |
+                  |   - @napi-rs/keyring          |
+                  |     (libsecret/Keychain/CredM)|
                   |   - in-memory fallback        |
+                  |     (gated by env opt-in)     |
                   |   - optional KeyVaultAdapter  |
                   |     wrapping @azure/keyvault- |
                   |     secrets SecretClient      |
@@ -139,9 +141,12 @@ See [judge-panel.md](./judge-panel.md).
 ## Secret store
 
 `packages/secret-store/src/index.ts` exports `SecretStore`. `set(scope,
-name, value)` writes to keytar first (`service = "app-factory:<scope>"`,
-`account = <name>`), falls back to an in-memory `Map` when keytar fails to
-load, and optionally mirrors to a `KeyVaultAdapter`. `azureKeyVaultAdapter`
+name, value)` writes via `@napi-rs/keyring` first
+(`service = "app-factory:<scope>"`, `account = <name>`), and optionally
+mirrors to a `KeyVaultAdapter`. If the OS keyring is unreachable, `set`
+throws `AppFactoryError('SECRET_STORE_UNAVAILABLE')` unless the operator
+opts into an ephemeral in-memory fallback via
+`APP_FACTORY_ALLOW_MEMORY_SECRETS=1`. `azureKeyVaultAdapter`
 wraps a `SecretClient` from `@azure/keyvault-secrets`; KV names are
 sanitised to `[A-Za-z0-9-]`.
 

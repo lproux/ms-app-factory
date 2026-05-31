@@ -183,7 +183,19 @@ vi.mock('@app-factory/azure-ops', async (orig) => {
   };
 });
 
-vi.mock('keytar', () => ({ default: undefined }));
+// Stub the OS keyring so integration tests never touch the host backend.
+// `@napi-rs/keyring` replaced the old `keytar` dependency (security/maint).
+vi.mock('@napi-rs/keyring', () => ({
+  Entry: class FakeEntry {
+    constructor(public service: string, public account: string) {}
+    setPassword(_value: string) {
+      /* no-op */
+    }
+    getPassword() {
+      return null;
+    }
+  },
+}));
 
 // -- Imports of the system under test happen AFTER mocks are declared -------
 

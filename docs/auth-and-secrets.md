@@ -94,10 +94,14 @@ delegated-only API path.
 
 `SecretStore.set(scope, name, value)` and `.get(scope, name)`:
 
-1. Try `keytar` (OS keyring). The service is `app-factory:<scope>`; the
-   account is `<name>`. If `keytar` fails to load (Linux without
-   `libsecret`, Windows without Credential Manager APIs, etc.), the store
-   logs a warning and falls back to a process-local `Map`.
+1. Try the OS keyring via `@napi-rs/keyring` (libsecret on Linux, Keychain
+   on macOS, Credential Manager on Windows). The service is
+   `app-factory:<scope>`; the account is `<name>`. If the backend is
+   unavailable (e.g. Linux without `libsecret`), `set` throws
+   `AppFactoryError('SECRET_STORE_UNAVAILABLE')` unless the operator opts
+   into the ephemeral in-memory fallback by exporting
+   `APP_FACTORY_ALLOW_MEMORY_SECRETS=1`. See `docs/secret-store.md` for
+   the backend matrix and the rationale behind the explicit opt-in.
 2. Optionally mirror to an Azure Key Vault via a `KeyVaultAdapter`.
 
 `azureKeyVaultAdapter(client)` wraps a `SecretClient` from
@@ -109,7 +113,7 @@ character outside `[A-Za-z0-9-]` with `-`, so a `scope='copilot-studio'`,
 
 ```ts
 emit: {
-  keyring: true,       // write to keytar (default true)
+  keyring: true,       // write to OS keyring (default true)
   keyVault?: string,   // KV vault URL
   pasteBundlePath?: string,
 }
