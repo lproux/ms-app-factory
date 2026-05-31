@@ -1,0 +1,24 @@
+{
+  "name": "@app-factory/smoke-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Live-tenant smoke tests for App Factory (manual, opt-in via env vars).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke:dry": "tsx scripts/dry-run.ts",
+    "smoke:cs": "tsx scripts/run-copilot-studio.ts",
+    "smoke:teams": "tsx scripts/run-teams-app.ts",
+    "smoke:cleanup": "tsx scripts/cleanup.ts",
+    "clean": "rm -rf .turbo"
+  },
+  "dependencies": {
+    "@app-factory/cli": "workspace:*",
+    "@app-factory/copilot-studio": "workspace:*",
+    "@app-factory/teams-app": "workspace:*",
+    "@app-factory/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

@@ -1,0 +1,71 @@
+name: smoke-tests
+
+# Manual only. NEVER runs on push or PR — this hits a live Azure subscription,
+# a real Power Platform environment, and a real Teams tenant. The `smoke`
+# environment requires explicit approval before any secrets are exposed.
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why are you running smoke tests? (release name, bug id, etc.)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-tests
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: live-tenant smoke
+    runs-on: ubuntu-latest
+    environment: smoke
+    timeout-minutes: 60
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      APP_FACTORY_TEST_RG: ${{ secrets.APP_FACTORY_TEST_RG }}
+      APP_FACTORY_TEST_REGION: ${{ secrets.APP_FACTORY_TEST_REGION }}
+      APP_FACTORY_TEST_PP_ENV: ${{ secrets.APP_FACTORY_TEST_PP_ENV }}
+      APP_FACTORY_TEST_LOGO: ${{ secrets.APP_FACTORY_TEST_LOGO }}
+      APP_FACTORY_KEY_VAULT_URL: ${{ secrets.APP_FACTORY_KEY_VAULT_URL }}
+
+    steps:
+      - name: Log run reason
+        run: echo "Smoke run reason: ${{ inputs.reason }}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Dry run (planOnly — validates env + WBS plan path)
+        run: pnpm --filter @app-factory/smoke-tests smoke:dry
+
+      - name: Copilot Studio smoke
+        run: pnpm --filter @app-factory/smoke-tests smoke:cs
+
+      - name: Teams app smoke
+        run: pnpm --filter @app-factory/smoke-tests smoke:teams
+
+      - name: Best-effort cleanup
+        if: always()
+        run: pnpm --filter @app-factory/smoke-tests smoke:cleanup

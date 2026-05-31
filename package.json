@@ -14,6 +14,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:integration": "pnpm --filter @app-factory/integration-tests test",
+    "smoke": "pnpm --filter @app-factory/smoke-tests run smoke:dry",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
