@@ -16,7 +16,7 @@
     "@app-factory/shared": "workspace:*",
     "@app-factory/auth-broker": "workspace:*",
     "@azure/keyvault-secrets": "^4.9.0",
-    "@azure/identity": "^4.5.0",
+    "@azure/identity": "^4.13.2",
     "@napi-rs/keyring": "^1.3.0"
   },
   "devDependencies": {
